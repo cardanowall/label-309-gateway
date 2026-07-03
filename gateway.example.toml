@@ -1,0 +1,154 @@
+# Example gateway configuration. Copy to gateway.toml and adjust.
+#
+# The file carries no secrets: the database URL, the keyring passphrase, and
+# every API key arrive through the environment (each with a docker-secrets
+# `_FILE` twin). See gateway/README.md for the environment reference and
+# docs/operators.md for operational depth on every knob.
+#
+# This example targets preprod, the safe posture for bringing a deployment up.
+# Production is mainnet: set network = "mainnet" once the deployment is funded
+# and verified.
+
+network = "preprod"
+
+# Identity stamped onto background-job claims. Pin it (rather than defaulting to
+# the host name) so claim attribution survives container recreation.
+worker_id = "gateway-1"
+
+# The age-encrypted operator keyring, created with `gateway keyring`. Referenced
+# by path only; the passphrase comes from GATEWAY_KEYRING_PASSPHRASE(_FILE).
+keyring_path = "/etc/gateway/keyring.age"
+
+# Record byte-lengths the startup fee-stability check certifies the band
+# against. Must include the largest record the deployment will accept.
+fee_shape_record_sizes = [1, 64, 65, 1024, 14000]
+
+# The lovelace range a wallet UTxO must fall in to fund one publish; the wallet
+# loops groom funds into mid-band UTxOs, and the quote prices against mid.
+[band]
+min = 4000000
+max = 8000000
+mid = 6000000
+
+[wallet]
+# How long one publish may hold the UTxO it spends, and how many ready canonical
+# UTxOs each wallet keeps groomed for concurrent publishes.
+lease_secs = 120
+min_canonical_count = 4
+
+# The HTTP planes (/api/v1 data, /control/v1 control, /admin console). Delete
+# this section to run the background plane alone.
+[http]
+bind = "0.0.0.0:8080"
+# Base URL the RFC 7807 problem `type` members are built from. An identifier,
+# not a served URL.
+problem_type_base = "https://errors.example.com/gateway/v1"
+# Static ADA->USD (micro-USD per ADA) and the quote markup (0.25 = 25%). With
+# [fx] present the live snapshot supersedes the static rate.
+ada_usd_micros = 450000
+margin_pct = 0.25
+# Wall-clock ceiling (seconds) on an ordinary request; SSE and upload ingress
+# are exempt by construction.
+request_timeout_secs = 30
+# Per-client-address budget (requests/minute) for anonymous public-records
+# reads. Behind a proxy, size it for the proxy's aggregate.
+anon_rate_limit_per_min = 120
+# Concurrently live SSE streams, instance-wide and per account.
+sse_max_streams = 1024
+sse_max_streams_per_account = 32
+
+# Live FX: one refresh cron is the only oracle caller; every quote reads its
+# cached snapshot. Prices come from keyless CoinPaprika by default (no API key).
+# Delete this section to price from the static [http] rate instead.
+[fx]
+# Use CoinGecko as the primary provider (CoinPaprika stays the fallback):
+# uncomment and set GATEWAY_COINGECKO_API_KEY; "demo" (free) or "pro" (paid).
+# coingecko_tier = "pro"
+refresh_schedule = "0 */15 * * * *"
+# Freshness ceiling (seconds): once the newest snapshot is older than this,
+# quotes are refused (503) rather than priced at a stale rate.
+max_fx_snapshot_age_seconds = 3600
+
+# Content storage. Delete this section for a hash-only deployment (uploads
+# report unavailable; quotes skip storage pricing).
+[storage]
+# "turbo" (production Arweave via a bundler), "arlocal" (local emulator for dev,
+# refused on mainnet), or "direct-arweave" (reserved, not yet implemented).
+backend = "turbo"
+# The two public Turbo hosts: uploads POST to the upload service; the credit
+# reconcile loop reads the live winc balance from the payment service.
+upload_url = "https://upload.ardrive.io"
+payment_url = "https://payment.ardrive.io"
+# Read-only Arweave gateway: ar:// resolution, crash-recovery lookups, and the
+# per-byte price fallback oracle.
+gateway_url = "https://arweave.net"
+# Local ArLocal endpoint. Required only for backend = "arlocal"; ignored here.
+# arlocal_endpoint = "http://localhost:1984"
+# Scratch dir streamed uploads pass through (tmpfs is fine) and the durable dir
+# staged content is promoted to (must survive a crash, so never tmpfs). Both
+# must be writable by the runtime user; the published image owns /var/lib/gateway.
+staging_dir = "/var/lib/gateway/staging"
+durable_staging_dir = "/var/lib/gateway/durable"
+# Uploads at or under this many bytes are stored free of charge (100 KiB).
+free_storage_bytes = 102400
+# Static per-byte storage rate (femto-USD/byte). Superseded by the live [fx]
+# snapshot; required by the schema so a quote never prices storage at zero.
+ar_usd_per_byte_femto = 20955000
+# Winc-credit housekeeping: the reconcile cron (the only winc network caller),
+# the credit floor below which uploads are refused, and the drift alert.
+winc_refresh_schedule = "0 */5 * * * *"
+winc_safety_floor = 0
+winc_drift_alert_threshold = 0
+# Upload lifecycle clocks (seconds). The horizon and the lease must both exceed
+# the timeout; validated at load.
+upload_timeout_secs = 300
+reconcile_horizon_secs = 900
+upload_claim_lease_ttl_secs = 360
+attempt_stuck_passes = 12
+
+# Resumable-upload sessions. The defaults fit under a ~100 MB proxy body cap; a
+# create request's chunk_bytes is clamped into [min_chunk_bytes, max_chunk_bytes].
+[storage.sessions]
+max_chunk_bytes = 67108864
+min_chunk_bytes = 1048576
+default_chunk_bytes = 50331648
+session_ttl_secs = 86400
+max_open_sessions_per_account = 64
+
+# Control-plane knobs. The defaults shown apply when the section is absent.
+[control]
+# Human-readable prefix minted credentials and API keys carry.
+secret_prefix = "ctl_"
+# Minted-token lifetimes (seconds): operator tokens a day, account tokens an hour.
+operator_token_ttl_secs = 86400
+account_token_ttl_secs = 3600
+# Largest single balance adjustment (micro-USD; $10,000). Every credit a billing
+# wrapper applies rides one.
+adjustment_cap_usd_micros = 10000000000
+# Serve the bundled /admin console (an operator pastes a token into the page).
+admin_ui_enabled = true
+# Grant a fresh wallet / funding source receives when its registration names
+# none: "service" (usable by every account) or "operator" (registrar-only).
+default_wallet_scope = "service"
+default_storage_scope = "service"
+
+# Webhook delivery posture. The defaults shown are the production posture
+# (HTTPS-only targets, loopback/private ranges blocked); the knobs are
+# independent, so allow_insecure_http never loosens the IP range-block.
+[webhooks]
+allow_insecure_http = false
+egress_allow_loopback = false
+
+# Chain providers. Absent runs keyless public Koios (~5,000 requests/day) with a
+# second Koios call as the failover.
+[chain]
+# Per-provider egress budget (sustained requests/minute + burst). The defaults
+# keep a runaway loop under the keyless Koios daily quota.
+egress_requests_per_minute = 30
+egress_burst = 300
+# Full base URL of a self-hosted or alternative Koios instance (no trailing
+# slash). It MUST serve this deployment's network.
+# koios_url = "https://koios.example/api/v1"
+# Path to a file holding a Blockfrost project id, enabling Blockfrost failover
+# on Koios rate limits. GATEWAY_BLOCKFROST_PROJECT_ID(_FILE) takes precedence.
+# blockfrost_project_id_path = "/run/secrets/blockfrost-project-id"

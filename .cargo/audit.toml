@@ -1,0 +1,43 @@
+# cargo-audit configuration for the gateway workspace.
+#
+# Run `cargo audit` from this directory; cargo-audit loads this file
+# automatically. The advisories listed below are reviewed, accepted risks —
+# each is either not applicable to how this codebase uses the crate or has no
+# available upstream fix. Every entry carries the reasoning so the decision can
+# be re-examined whenever the dependency tree or an advisory changes. An
+# advisory is ignored by its exact RUSTSEC id, so a *different* future advisory
+# against the same crate still surfaces.
+
+[advisories]
+ignore = [
+    # rsa 0.9.x — RUSTSEC-2023-0071, "Marvin Attack" (timing side-channel).
+    #
+    # The `rsa` crate is pulled in by our `ans104` crate to produce the
+    # RSA-4096 PSS signatures that Arweave mandates for ANS-104 data items.
+    # The algorithm is fixed by the Arweave protocol and cannot be substituted.
+    #
+    # The Marvin attack is a chosen-ciphertext timing oracle against RSA
+    # *decryption* with PKCS#1 v1.5 padding. This codebase never performs RSA
+    # decryption: the private key is used only for PSS *signing* of data items
+    # the gateway itself constructs, and the public key only for PSS
+    # verification. There is no decryption oracle, and no fine-grained signing
+    # timing oracle is exposed (signing happens server-side during an upload;
+    # the resulting signature is published on Arweave and is public anyway).
+    # No fixed release of the pure-Rust `rsa` crate exists. Risk accepted.
+    "RUSTSEC-2023-0071",
+
+    # paste 1.0.15 — RUSTSEC-2024-0436, crate no longer maintained.
+    #
+    # Informational only (no vulnerability). `paste` is a compile-time
+    # proc-macro pulled in transitively by build-time dependencies; it produces
+    # no runtime code path of its own. Accepted until the dependents migrate
+    # off it upstream.
+    "RUSTSEC-2024-0436",
+
+    # proc-macro-error2 2.0.1 — RUSTSEC-2026-0173, crate unmaintained.
+    #
+    # Informational only (no vulnerability). A compile-time proc-macro helper
+    # reached transitively through build-time dependencies; not present at
+    # runtime. Accepted until the dependents migrate off it upstream.
+    "RUSTSEC-2026-0173",
+]

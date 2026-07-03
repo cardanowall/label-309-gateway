@@ -1,0 +1,172 @@
+[workspace]
+resolver = "2"
+members = ["cardano-poe-tx", "ans104", "gateway-core", "gateway", "conformance"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["CardanoWall <hello@cardanowall.com>"]
+repository = "https://github.com/cardanowall/label-309-gateway"
+homepage = "https://github.com/cardanowall/label-309-gateway"
+
+[workspace.dependencies]
+# Cardano primitives, codec, transaction builder, signing keys, and address
+# parsing. crates.io carries two parallel release lines for the pallas family:
+# the stable 1.0 line and a *later-published* 0.36.x line. A plain "1.0"
+# requirement (^1.0) excludes 0.36.x by semver, but we pin the exact 1.0.0
+# patch so the resolved graph is unambiguous and the whole family moves as one
+# coherent set. The `gateway-rs` CI job additionally asserts via `cargo tree`
+# that every resolved pallas crate reports a 1.x version.
+pallas-txbuilder = "=1.0.0"
+pallas-primitives = "=1.0.0"
+pallas-codec = "=1.0.0"
+pallas-crypto = "=1.0.0"
+pallas-addresses = "=1.0.0"
+
+# RSA-PSS signing/verification for ANS-104 data items (the "arweave" signature
+# type, a 4096-bit RSA key signing the deep-hash of the item). sha2 is held at
+# 0.10 to match the digest version `rsa` 0.9 generics over: a single sha2 in
+# the tree lets the ANS-104 deep-hash (SHA-384) and the RSA-PSS digest (SHA-256)
+# share one `Digest` implementation, which a 0.11 bump would split in two.
+rsa = "0.9"
+# The bignum library `rsa` 0.9 builds on, used directly by the Arweave JWK
+# export (the CRT parameters dp/dq/qi are computed with its modular inverse).
+# Held at the 0.8 line `rsa` 0.9 publicly depends on so the BigUint types unify.
+# `zeroize` is explicit rather than inherited through `rsa`'s features because
+# the JWK export wipes the CRT big integers it computes itself.
+num-bigint-dig = { version = "0.8", features = ["zeroize"] }
+sha2 = "0.10"
+# Cryptographic RNG for the RSA-PSS salt. `rsa` 0.9 ships no random source of
+# its own, so the signer passes one in; rand 0.8 tracks the same rand_core 0.6
+# line `rsa` generics over, keeping a single rand_core in the graph.
+rand = "0.8"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+thiserror = "2"
+# URL-safe, no-padding base64 — the Arweave address/owner/data-item encoding.
+base64 = "0.22"
+
+# The operator keyring is an age-encrypted JSON envelope unlocked with a
+# passphrase (scrypt recipient), the same on-disk format the existing TS worker
+# produces. The Rust `age` crate decrypts that envelope in process.
+age = "0.11"
+# Hidden-input passphrase prompts for the `gateway keyring` subcommands: when no
+# passphrase environment variable is set and stdin is a terminal, the CLI asks
+# interactively (echo off) instead of failing.
+rpassword = "7"
+# Decode the operator's bech32 ed25519 signing keys (`ed25519_sk1...`) and
+# encode the derived Cardano payment address for the keyring address check.
+bech32 = "0.12"
+# Wipe decrypted key material from memory as soon as a signer is dropped, so a
+# private key never lingers on the heap past the lifetime of the wallet that
+# holds it.
+zeroize = { version = "1", features = ["derive"] }
+# XChaCha20-Poly1305 AEAD for the webhook signing-secret encrypt-at-rest: a
+# webhook secret, unlike an api key, must be read back by the server to recompute
+# HMACs at delivery time, so it is encrypted under a symmetric data key rather
+# than one-way hashed. Held at the 0.10 line the workspace already resolves
+# (pulled in transitively by the sealed-PoE SDK).
+chacha20poly1305 = "0.10.1"
+# HMAC-SHA256 over "{timestamp}.{body}" for the webhook delivery signature. Held
+# at 0.12 so it pairs with the sha2 0.10 already pinned above (a 0.13 hmac would
+# pull a second sha2 line into the graph).
+hmac = "0.12"
+# The OS CSPRNG behind the webhook secret-wrap data key and its AEAD nonce. 0.2
+# is the line the sealed-PoE SDK already resolves, so promoting it to a direct
+# dependency adds no new crate to the lockfile.
+getrandom = "0.2"
+
+# The gateway engine's Postgres substrate. sqlx 0.9 drives the job runtime,
+# durable events, and namespaced migrations. The feature set pins:
+#   - postgres + runtime-tokio + tls-rustls-ring: async PgPool over TLS, no
+#     OpenSSL system dependency.
+#   - uuid + chrono + json: the column types the schema uses (UUIDv7 keys,
+#     timestamptz, jsonb payloads).
+#   - migrate + macros + sqlx-toml: the `migrate!()` macro reads `sqlx.toml` at
+#     compile time so the migration-tracking table lands in the engine's own
+#     schema instead of `public`.
+#   - rust_decimal: maps the pricing margin's `numeric` column onto an exact
+#     128-bit decimal so a per-publish charge carries no binary-float rounding.
+sqlx = { version = "0.9", default-features = false, features = [
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "uuid",
+    "chrono",
+    "json",
+    "migrate",
+    "macros",
+    "sqlx-toml",
+    "rust_decimal",
+] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "signal",
+] }
+# The application binary parses its on-disk configuration (network, band,
+# cadences, secrets paths) from a TOML file layered with environment overrides.
+toml = "1"
+# A formatting `tracing` subscriber for the binary's structured logs. The library
+# crates only emit `tracing` events; the binary is the one process that installs a
+# subscriber to render them.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Ergonomic error context in the binary's startup/assembly path, where a failure
+# is reported to an operator rather than matched on. The library crates keep their
+# typed `Error`; only the binary uses `anyhow`.
+anyhow = "1"
+# Cron-expression parsing for the in-process scheduler. croner evaluates the
+# next occurrence in UTC, which the scheduler uses as the deterministic tick id.
+croner = "3"
+# UUIDv7 primary keys: time-ordered so a B-tree index on the key tracks
+# insertion order, which keeps the claim ORDER BY cheap.
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+tracing = "0.1"
+# Exact fixed-point decimal for the pricing margin and the money math that derives
+# a publish quote's service cost; pinned to the 1.x line sqlx 0.9 maps `numeric`
+# columns onto so a single rust_decimal resolves across the workspace.
+rust_decimal = "1"
+
+# The HTTP plane. axum is the router/handler framework the data-plane API is
+# built on; tower supplies the middleware abstraction (auth, rate-limit,
+# idempotency are tower layers) and tower-http the standard request-id / trace
+# layers. The router factory is exported from the engine crate so an embedding
+# application can mount it beside its own routes; the binary mounts it under the
+# same supervised JoinSet as the background plane.
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "cors", "timeout"] }
+# A tower service that streams a multipart body without buffering the whole
+# request in memory: the uploads route reads each part with a rolling hash and a
+# byte ceiling, so a multi-gigabyte content blob never lands in RAM at once.
+futures-util = "0.3"
+# Constant-time byte comparison for the API-key full-hash check, so a timing
+# side channel cannot leak how many leading bytes of a guessed key matched.
+subtle = "2"
+# Crockford base32 for the wire id codec (`poe_<base32-of-uuid>` and the API key
+# secret) — the same alphabet the published SDK ids use.
+data-encoding = "2"
+# Tmpfs-backed staging for content uploads. The uploads route streams each
+# multipart part into a named temporary file (rolling-hashed as it goes), so a
+# multi-gigabyte blob is never buffered in memory; the file is removed when its
+# guard drops, even on an error path.
+tempfile = "3"
+
+# The number-theory and KDF hot loops are unusably slow at opt-level 0:
+# generating a 4096-bit RSA key (num-bigint-dig's prime search) takes minutes,
+# and one scrypt pass over the operator keyring takes tens of seconds. Both run
+# under ordinary `cargo test`, so these dependencies are compiled optimized even
+# in the dev profile; workspace code is unaffected.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

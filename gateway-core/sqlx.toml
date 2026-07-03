@@ -1,0 +1,15 @@
+# The engine owns two Postgres schemas and never writes to the host database's
+# `public` schema. `cw_core` is the engine's private namespace; `cw_api` is the
+# stable extension contract a vendor may FK-reference. These settings make the
+# `migrate!()` macro honor that boundary at the framework level:
+#
+#   - table-name puts sqlx's own migration-tracking table inside `cw_core`
+#     rather than the default `public._sqlx_migrations`, so an embedding host
+#     application's migrations and the engine's migrations never collide.
+#   - create-schemas tells the migrator to `CREATE SCHEMA IF NOT EXISTS` for
+#     both engine schemas before the tracking table is created, so a fresh
+#     database bootstraps the engine's namespaces without a manual step. The
+#     tracking table itself stays in `cw_core`.
+[migrate]
+table-name = "cw_core._sqlx_migrations"
+create-schemas = ["cw_core", "cw_api"]

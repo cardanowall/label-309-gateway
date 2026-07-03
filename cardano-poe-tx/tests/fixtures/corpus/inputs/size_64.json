@@ -1,0 +1,42 @@
+{
+  "name": "size_64",
+  "mode": "standard",
+  "protocol": {
+    "min_fee_a": 44,
+    "min_fee_b": 155381,
+    "coins_per_utxo_byte": 4310,
+    "max_tx_size": 16384
+  },
+  "record_len": 64,
+  "utxos": [
+    {
+      "tx_hash": "5df646d44dd15cd80b330ac9dec1a78f325ea09af4658d89c354565d5b951b8e",
+      "index": 0,
+      "lovelace": 6000000
+    },
+    {
+      "tx_hash": "c36525bc4b4d0d87764d822e2bec2743bbe1fb290ac486a48d6bcb40e689f58a",
+      "index": 1,
+      "lovelace": 6000000
+    },
+    {
+      "tx_hash": "588e2f41643a5928f90f01c174b0401b263876d505dc3169faf5c17447403d9f",
+      "index": 2,
+      "lovelace": 6000000
+    },
+    {
+      "tx_hash": "7961dc022e987e9a4603ad4d5bc209ac9c5aa3efab7c05f82ef080230740f17c",
+      "index": 3,
+      "lovelace": 6000000
+    },
+    {
+      "tx_hash": "c230b4c3ed85fde98ca597d61b3d9daa553d5396aa2fec4d720c8bf88c1420f6",
+      "index": 4,
+      "lovelace": 6000000
+    }
+  ],
+  "validity": null,
+  "expect": "ok",
+  "change_address": "addr_test1vpa8ukd77k05gc3etxeyzylxxmyhzg0hvne9qplxvsyl44q6pl7v4",
+  "network_id": 0
+}

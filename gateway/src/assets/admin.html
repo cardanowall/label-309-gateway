@@ -1,0 +1,3672 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Label 309 Gateway · Control console</title>
+    <!-- Inline favicon: keeps the page a single self-contained document and
+         silences the browser's automatic /favicon.ico request (the gateway
+         serves no such route). -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M9 16.5l5 5 9-10' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <style>
+      /* ------------------------------------------------------------------ */
+      /* Design tokens. One accent family (#3B82F6) in both schemes; every  */
+      /* text/background pair holds >= 4.5:1 contrast.                       */
+      /* ------------------------------------------------------------------ */
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f6f9;
+        --surface: #ffffff;
+        --surface-2: #f3f5f8;
+        --fg: #161a20;
+        --muted: #546070;
+        --faint: #7b8696;
+        --border: #dfe3ea;
+        --border-strong: #c4ccd7;
+        --accent: #2563eb;
+        --accent-strong: #1d4ed8;
+        --accent-soft: #e7eefc;
+        --accent-on-soft: #1c4fd6;
+        --ok: #156d39;
+        --ok-soft: #e0f3e7;
+        --warn: #82500a;
+        --warn-soft: #fbf0d9;
+        --danger: #b3261e;
+        --danger-soft: #fceae8;
+        --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.08);
+        --radius: 12px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --surface: #151b24;
+          --surface-2: #1b2330;
+          --fg: #e7ebf1;
+          --muted: #a3aebd;
+          --faint: #76828f;
+          --border: #28303d;
+          --border-strong: #39455a;
+          --accent: #5b96f7;
+          --accent-strong: #82b1fa;
+          --accent-soft: #1c2c4a;
+          --accent-on-soft: #9cc1fb;
+          --ok: #5fd692;
+          --ok-soft: #11301f;
+          --warn: #f0b35c;
+          --warn-soft: #33260e;
+          --danger: #f49289;
+          --danger-soft: #3c1714;
+          --shadow: none;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.55 system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.93em;
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      a {
+        color: var(--accent);
+      }
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        background: var(--surface);
+        padding: 8px 12px;
+        z-index: 10;
+      }
+      .skip:focus {
+        left: 8px;
+      }
+      .vh {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* ---------------------------- Header ------------------------------ */
+      header {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 12px clamp(14px, 3vw, 28px) 10px;
+      }
+      .header-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 22px;
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+      }
+      .brand .mark {
+        flex: none;
+        display: block;
+      }
+      .wordmark {
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .wordmark b {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .brand-sub {
+        display: block;
+        font-size: 11.5px;
+        color: var(--muted);
+        margin-top: -2px;
+      }
+      #token-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1 1 340px;
+        min-width: 0;
+      }
+      #token {
+        flex: 1 1 140px;
+        min-width: 0;
+      }
+      .conn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .conn::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--faint);
+      }
+      .conn[data-state='ok']::before {
+        background: var(--ok);
+      }
+      .conn[data-state='warn']::before {
+        background: var(--warn);
+      }
+      .conn[data-state='err']::before {
+        background: var(--danger);
+      }
+      .token-hint {
+        max-width: 1180px;
+        margin: 6px auto 0;
+        font-size: 11.5px;
+        color: var(--faint);
+      }
+
+      /* ----------------------------- Tabs ------------------------------- */
+      nav[role='tablist'] {
+        display: flex;
+        gap: 2px;
+        overflow-x: auto;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 0 clamp(8px, 3vw, 28px);
+      }
+      nav[role='tablist'] > div {
+        display: flex;
+        gap: 2px;
+        max-width: 1180px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      nav button {
+        appearance: none;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 13.5px;
+        font-weight: 550;
+        padding: 10px 13px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      nav button:hover {
+        background: var(--surface-2);
+        color: var(--fg);
+      }
+      nav button[aria-selected='true'] {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+
+      /* ----------------------------- Layout ----------------------------- */
+      main {
+        flex: 1;
+        width: 100%;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 18px clamp(12px, 3vw, 28px) 40px;
+      }
+      section[role='tabpanel'][hidden] {
+        display: none;
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin: 4px 0 14px;
+      }
+      .bar h2 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 650;
+      }
+      .grow {
+        flex: 1;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 16px 18px;
+        margin-bottom: 16px;
+      }
+      .card > h3 {
+        margin: 0 0 2px;
+        font-size: 13.5px;
+        font-weight: 650;
+      }
+      .card .hint {
+        margin: 0 0 12px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .two-col .card {
+        margin-bottom: 0;
+      }
+
+      /* ----------------------------- Controls --------------------------- */
+      input,
+      select,
+      textarea {
+        font: inherit;
+        font-size: 13.5px;
+        color: var(--fg);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        padding: 7px 10px;
+      }
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+        outline: none;
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+      button {
+        appearance: none;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 570;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        padding: 7px 14px;
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+      }
+      @media (prefers-color-scheme: dark) {
+        button {
+          color: #0d1117;
+        }
+      }
+      button:hover {
+        background: var(--accent-strong);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button.ghost {
+        background: transparent;
+        color: var(--fg);
+        border-color: var(--border-strong);
+      }
+      button.ghost:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: transparent;
+      }
+      button.danger {
+        background: transparent;
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+      button.danger:hover {
+        background: var(--danger-soft);
+      }
+      button.sm {
+        font-size: 12px;
+        padding: 4px 10px;
+        border-radius: 7px;
+      }
+      button.confirming {
+        background: var(--danger);
+        border-color: var(--danger);
+        color: #fff;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .field > span {
+        font-size: 12px;
+        font-weight: 560;
+        color: var(--muted);
+      }
+      .field small {
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .inline-form,
+      .form-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: flex-end;
+      }
+      .form-grid {
+        align-items: flex-end;
+      }
+      .form-note {
+        flex-basis: 100%;
+        font-size: 11.5px;
+        color: var(--faint);
+        margin: 0;
+      }
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px 12px 10px;
+        margin: 0;
+        min-width: 0;
+      }
+      legend {
+        font-size: 12px;
+        font-weight: 560;
+        color: var(--muted);
+        padding: 0 4px;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 4px 16px;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 13px;
+        padding: 2px 0;
+      }
+      .check input {
+        accent-color: var(--accent);
+        width: 15px;
+        height: 15px;
+        margin: 0;
+      }
+
+      /* ----------------------------- Tables ----------------------------- */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 640;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      tbody tr:last-child > td {
+        border-bottom: none;
+      }
+      td.num,
+      th.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      td.actions {
+        text-align: right;
+        white-space: nowrap;
+      }
+      td.actions button {
+        margin-left: 6px;
+        margin-bottom: 4px;
+      }
+      .cell-sub {
+        display: block;
+        font-size: 11.5px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      tr.detail-row > td {
+        background: var(--surface-2);
+        border-radius: 8px;
+        padding: 14px;
+      }
+      .scroll-x {
+        overflow-x: auto;
+      }
+      .scroll-x table {
+        min-width: 640px;
+      }
+
+      .idwrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+      }
+      .idwrap code {
+        white-space: nowrap;
+      }
+      button.copy {
+        background: none;
+        border: none;
+        color: var(--faint);
+        padding: 2px;
+        line-height: 0;
+        border-radius: 5px;
+        cursor: pointer;
+        flex: none;
+      }
+      button.copy:hover {
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+      button.copy .ic-check {
+        display: none;
+        color: var(--ok);
+      }
+      button.copy.copied .ic-copy {
+        display: none;
+      }
+      button.copy.copied .ic-check {
+        display: inline;
+      }
+
+      .time {
+        display: inline-block;
+        white-space: nowrap;
+      }
+      .time small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .money {
+        font-variant-numeric: tabular-nums;
+        font-weight: 560;
+      }
+
+      .badge {
+        display: inline-block;
+        font-size: 11.5px;
+        font-weight: 620;
+        padding: 2px 9px;
+        border-radius: 999px;
+        white-space: nowrap;
+        background: var(--surface-2);
+        color: var(--muted);
+      }
+      .badge[data-tone='ok'] {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      .badge[data-tone='warn'] {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+      .badge[data-tone='danger'] {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .badge[data-tone='accent'] {
+        background: var(--accent-soft);
+        color: var(--accent-on-soft);
+      }
+      .chip {
+        display: inline-block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1px 6px;
+        margin: 1px 3px 1px 0;
+        white-space: nowrap;
+      }
+
+      /* ------------------------- Feedback blocks ------------------------ */
+      .status {
+        min-height: 18px;
+        margin: 0 0 10px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .problem {
+        background: var(--danger-soft);
+        border-left: 3px solid var(--danger);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0;
+        font-size: 13px;
+      }
+      .problem strong {
+        color: var(--danger);
+      }
+      .problem small {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+      }
+      .notice {
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0;
+        font-size: 13px;
+        background: var(--accent-soft);
+        color: var(--accent-on-soft);
+      }
+      .notice[data-tone='ok'] {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      .notice[data-tone='warn'] {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+      .empty-state {
+        text-align: center;
+        color: var(--muted);
+        padding: 26px 12px;
+        font-size: 13px;
+      }
+      .empty-state b {
+        display: block;
+        color: var(--fg);
+        font-size: 13.5px;
+        margin-bottom: 3px;
+      }
+
+      .secret-panel {
+        background: var(--warn-soft);
+        border: 1px solid var(--warn);
+        border-radius: 10px;
+        padding: 13px 16px;
+        margin: 12px 0;
+      }
+      .secret-panel .secret-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .secret-panel .secret-head strong {
+        color: var(--warn);
+        flex: 1;
+      }
+      .secret-panel .secret-note {
+        margin: 6px 0 8px;
+        font-size: 12.5px;
+        color: var(--warn);
+      }
+      .secret-value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 12px;
+      }
+      .secret-value code {
+        word-break: break-all;
+        flex: 1;
+        font-size: 12.5px;
+      }
+      .secret-meta {
+        margin-top: 8px;
+        font-size: 12.5px;
+        color: var(--muted);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+      }
+      .stat {
+        background: var(--surface-2);
+        border-radius: 10px;
+        padding: 10px 13px;
+        min-width: 0;
+      }
+      .stat .v {
+        font-size: 16px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+        word-break: break-word;
+      }
+      .stat .k {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+
+      pre.json {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        overflow-x: auto;
+        margin: 6px 0 0;
+        max-height: 320px;
+      }
+      .json-pair {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+      }
+      .json-pair h4 {
+        margin: 0;
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      /* ----------------------------- Footer ----------------------------- */
+      footer {
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        padding: 16px clamp(14px, 3vw, 28px);
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      footer .foot-row {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 22px;
+        align-items: center;
+      }
+
+      /* ------------------------- Small screens -------------------------- */
+      /* Roster tables collapse into stacked cards; each cell is labelled    */
+      /* by its column header so nothing wraps into vertical letter columns. */
+      @media (max-width: 720px) {
+        table.r,
+        table.r tbody,
+        table.r tr,
+        table.r td {
+          display: block;
+          width: 100%;
+        }
+        table.r thead {
+          display: none;
+        }
+        table.r tbody tr {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          margin-bottom: 10px;
+          padding: 4px 12px;
+        }
+        table.r td {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: space-between;
+          align-items: baseline;
+          gap: 4px 14px;
+          border-bottom: 1px dashed var(--border);
+          padding: 7px 0;
+        }
+        /* Multi-part cells (label + URL + id) stack as full-width lines under
+           the field label instead of overflowing the card horizontally. */
+        table.r td .cell-sub {
+          flex-basis: 100%;
+          text-align: right;
+          overflow-wrap: anywhere;
+        }
+        table.r td:last-child {
+          border-bottom: none;
+        }
+        table.r td[data-th]::before {
+          content: attr(data-th);
+          flex: none;
+          font-size: 11px;
+          font-weight: 640;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: var(--muted);
+          padding-top: 2px;
+        }
+        table.r td.num {
+          text-align: right;
+        }
+        table.r td.actions {
+          justify-content: flex-end;
+          flex-wrap: wrap;
+        }
+        table.r td.actions button {
+          margin-left: 0;
+        }
+        table.r tr.detail-row {
+          padding: 0;
+          background: var(--surface-2);
+        }
+        table.r tr.detail-row > td {
+          display: block;
+        }
+        .idwrap code {
+          font-size: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header>
+      <div class="header-row">
+        <div class="brand">
+          <svg
+            class="mark"
+            width="30"
+            height="30"
+            viewBox="0 0 30 30"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <defs>
+              <linearGradient id="mkg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#3b82f6" />
+                <stop offset="1" stop-color="#1d4ed8" />
+              </linearGradient>
+            </defs>
+            <rect x="1" y="1" width="28" height="28" rx="8" fill="url(#mkg)" />
+            <path
+              d="M9 15.4l4.2 4.3 8.3-9.6"
+              fill="none"
+              stroke="#fff"
+              stroke-width="2.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <div>
+            <span class="wordmark">Label&nbsp;309 <b>Gateway</b></span>
+            <span class="brand-sub">Control console</span>
+          </div>
+        </div>
+        <form id="token-form">
+          <label for="token" class="vh">Operator token</label>
+          <input
+            id="token"
+            type="password"
+            placeholder="Paste an operator token (ctl_…)"
+            autocomplete="off"
+          />
+          <button type="submit" id="connect-btn">Connect</button>
+          <span class="conn" id="conn" data-state="off" role="status">Not connected</span>
+        </form>
+      </div>
+      <p class="token-hint">
+        The token lives in this tab's sessionStorage only and is sent nowhere but this gateway's
+        /control/v1 API. Day-to-day work runs on a minted operator token; only the operator ROOT
+        credential may register wallets or storage and mint operator tokens — those actions answer
+        403 under an ordinary token.
+      </p>
+    </header>
+
+    <nav role="tablist" aria-label="Console sections">
+      <div>
+        <button role="tab" aria-selected="true" aria-controls="tab-accounts" data-tab="accounts">
+          Accounts
+        </button>
+        <button role="tab" aria-selected="false" aria-controls="tab-keys" data-tab="keys">
+          Keys &amp; tokens
+        </button>
+        <button role="tab" aria-selected="false" aria-controls="tab-wallets" data-tab="wallets">
+          Wallets
+        </button>
+        <button role="tab" aria-selected="false" aria-controls="tab-storage" data-tab="storage">
+          Storage
+        </button>
+        <button role="tab" aria-selected="false" aria-controls="tab-webhooks" data-tab="webhooks">
+          Webhooks
+        </button>
+        <button role="tab" aria-selected="false" aria-controls="tab-audit" data-tab="audit">
+          Audit
+        </button>
+      </div>
+    </nav>
+
+    <main id="main">
+      <!-- ============================ Accounts ========================== -->
+      <section role="tabpanel" id="tab-accounts" aria-label="Accounts">
+        <div class="bar">
+          <h2>Accounts</h2>
+          <span class="grow"></span>
+          <button type="button" id="acc-create">Create account</button>
+          <button type="button" class="ghost" id="acc-refresh">Refresh</button>
+        </div>
+        <p class="status" id="acc-status" role="status" aria-live="polite"></p>
+        <div id="acc-flash"></div>
+        <div class="card">
+          <table class="r" aria-label="Account roster">
+            <thead>
+              <tr>
+                <th scope="col">Account</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">Balance</th>
+                <th scope="col">Created</th>
+                <th scope="col"><span hidden>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="acc-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ========================= Keys & tokens ======================== -->
+      <section role="tabpanel" id="tab-keys" aria-label="Keys and tokens" hidden>
+        <div class="bar">
+          <h2>Keys &amp; tokens</h2>
+          <span class="grow"></span>
+          <label class="field" style="flex-direction: row; align-items: center; gap: 8px">
+            <span>Account</span>
+            <select id="key-acc" aria-label="Account the keys and tokens act on"></select>
+          </label>
+          <button type="button" class="ghost" id="key-refresh">Refresh</button>
+        </div>
+        <p class="status" id="key-status" role="status" aria-live="polite"></p>
+        <div id="key-flash"></div>
+
+        <div class="card">
+          <h3>API keys</h3>
+          <p class="hint">
+            Long-lived data-plane credentials for the selected account. Secrets are shown exactly
+            once at creation.
+          </p>
+          <table class="r" aria-label="API keys">
+            <thead>
+              <tr>
+                <th scope="col">Key</th>
+                <th scope="col">Label</th>
+                <th scope="col">Scopes</th>
+                <th scope="col" class="num">Rate / min</th>
+                <th scope="col">Created</th>
+                <th scope="col">Last used</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span hidden>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="key-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <h3>Create API key</h3>
+            <p class="hint">The key secret is returned once and never retrievable again.</p>
+            <form id="key-create-form" class="form-grid">
+              <fieldset>
+                <legend>Scopes (at least one)</legend>
+                <div class="scope-grid" id="key-scope-boxes"></div>
+              </fieldset>
+              <label class="field">
+                <span>Label (optional)</span>
+                <input name="label" placeholder="e.g. production backend" />
+              </label>
+              <label class="field">
+                <span>Rate limit / min</span>
+                <input name="rate" type="number" min="1" max="1000000" placeholder="default" />
+                <small>Empty = the data-plane default budget</small>
+              </label>
+              <button type="submit">Create key</button>
+              <div class="form-note" id="key-create-flash"></div>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>Mint account token</h3>
+            <p class="hint">
+              A short-lived data-plane token scoped to the selected account (the same path a
+              first-party wrapper authenticates through).
+            </p>
+            <form id="tok-form" class="form-grid">
+              <fieldset>
+                <legend>Scopes (may be empty)</legend>
+                <div class="scope-grid" id="tok-scope-boxes"></div>
+              </fieldset>
+              <label class="field">
+                <span>Rate limit / min</span>
+                <input name="rate" type="number" min="1" max="1000000" placeholder="default" />
+              </label>
+              <button type="submit">Mint token</button>
+              <div class="form-note" id="tok-flash-note"></div>
+            </form>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Mint operator token</h3>
+          <p class="hint">
+            Exchanges the operator ROOT credential for a short-lived operator token (24&nbsp;h by
+            default) — the token this console should run on. The root secret authorizes only this
+            single call, stays in this form field, and is never stored.
+          </p>
+          <form id="op-token-form" class="inline-form">
+            <label class="field grow" style="flex: 1 1 260px">
+              <span>Operator root credential</span>
+              <input name="root" type="password" autocomplete="off" required placeholder="ctl_…" />
+            </label>
+            <button type="submit">Mint operator token</button>
+          </form>
+          <div id="op-flash"></div>
+        </div>
+      </section>
+
+      <!-- ============================ Wallets =========================== -->
+      <section role="tabpanel" id="tab-wallets" aria-label="Wallets" hidden>
+        <div class="bar">
+          <h2>Wallets</h2>
+          <span class="grow"></span>
+          <button type="button" class="ghost" id="wal-refresh">Refresh</button>
+        </div>
+        <p class="status" id="wal-status" role="status" aria-live="polite"></p>
+        <div id="wal-flash"></div>
+
+        <div class="card">
+          <table class="r" aria-label="Wallet roster">
+            <thead>
+              <tr>
+                <th scope="col">Wallet</th>
+                <th scope="col">Address</th>
+                <th scope="col">Network</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">UTxOs avail / canonical</th>
+                <th scope="col">Created</th>
+                <th scope="col"><span hidden>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="wal-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Register wallet</h3>
+          <p class="hint">
+            Root-gated: registration binds a shared-keyring Cardano signing key to this operator, so
+            it requires the operator ROOT credential — an ordinary operator token answers 403. The
+            address must be one this server's keyring physically holds (it is verified against the
+            signing key at unlock); an address the keyring cannot sign for is refused.
+          </p>
+          <form id="wal-register-form" class="form-grid">
+            <label class="field">
+              <span>Label</span>
+              <input name="label" required placeholder="e.g. primary" />
+            </label>
+            <label class="field grow" style="flex: 1 1 280px">
+              <span>Address</span>
+              <input name="address" required placeholder="addr…" class="mono" />
+            </label>
+            <label class="field">
+              <span>Network</span>
+              <select name="network">
+                <option value="mainnet">mainnet</option>
+                <option value="preprod">preprod</option>
+                <option value="preview">preview</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Spend scope</span>
+              <select name="scope" data-scope-select>
+                <option value="">instance default</option>
+                <option value="service">service — any operator/account</option>
+                <option value="operator">operator — registrar only</option>
+                <option value="account">account — one named account</option>
+              </select>
+            </label>
+            <label class="field" data-scope-account hidden>
+              <span>Granted account</span>
+              <select name="scope_account_id"></select>
+            </label>
+            <label class="field grow" style="flex: 1 1 240px">
+              <span>Root credential</span>
+              <input
+                name="root"
+                type="password"
+                autocomplete="off"
+                placeholder="ctl_… (empty = use session token)"
+              />
+            </label>
+            <button type="submit">Register wallet</button>
+          </form>
+          <div id="wal-register-flash"></div>
+        </div>
+      </section>
+
+      <!-- ============================ Storage =========================== -->
+      <section role="tabpanel" id="tab-storage" aria-label="Storage" hidden>
+        <div class="bar">
+          <h2>Storage</h2>
+          <span class="grow"></span>
+          <button type="button" class="ghost" id="sto-refresh">Refresh</button>
+        </div>
+        <p class="status" id="sto-status" role="status" aria-live="polite"></p>
+        <div id="sto-flash"></div>
+        <div id="sto-unconfigured" hidden></div>
+
+        <div class="two-col">
+          <div class="card">
+            <h3>Funding summary</h3>
+            <p class="hint">Cached rows across this operator's sources — no provider call.</p>
+            <div id="sto-funding"></div>
+          </div>
+          <div class="card">
+            <h3>Operator balance</h3>
+            <p class="hint">
+              A live provider read: on-chain AR per funding wallet plus the prepaid credit balance
+              on a payment-service backend.
+            </p>
+            <div id="sto-balance"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Funding sources</h3>
+          <table class="r" aria-label="Storage funding sources">
+            <thead>
+              <tr>
+                <th scope="col">Source</th>
+                <th scope="col">Backend</th>
+                <th scope="col">Address</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">Credits</th>
+                <th scope="col">Reconciled</th>
+                <th scope="col"><span hidden>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="sto-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Top up credits</h3>
+          <p class="hint">
+            Converts on-chain AR from the funding wallet into prepaid provider upload credits.
+            <strong>Irreversible</strong> — credits can never be converted back to AR.
+          </p>
+          <form id="topup-form" class="inline-form">
+            <label class="field">
+              <span>Funding source</span>
+              <select name="source"></select>
+            </label>
+            <label class="field">
+              <span>Amount (AR)</span>
+              <input name="ar" inputmode="decimal" required placeholder="0.5" />
+            </label>
+            <button type="submit">Convert</button>
+            <p class="form-note" id="topup-preview" aria-live="polite"></p>
+          </form>
+          <div id="topup-flash"></div>
+        </div>
+
+        <div class="card">
+          <h3>Top-up journal</h3>
+          <p class="hint">
+            Every AR → credit conversion, newest first. An unfinished top-up retries
+            <em>forward</em> — the same signed transfer is re-broadcast and re-registered, never
+            re-signed.
+          </p>
+          <table class="r" aria-label="Top-up journal">
+            <thead>
+              <tr>
+                <th scope="col">Created</th>
+                <th scope="col" class="num">Amount</th>
+                <th scope="col" class="num">Fee</th>
+                <th scope="col">Status</th>
+                <th scope="col">Transfer tx</th>
+                <th scope="col" class="num">Credited</th>
+                <th scope="col"><span hidden>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="topup-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Register funding source</h3>
+          <p class="hint">
+            Root-gated, like wallet registration: it binds a shared-keyring Arweave key to this
+            operator. The address must be one this server's keyring holds (derived from the JWK at
+            unlock).
+          </p>
+          <form id="sto-register-form" class="form-grid">
+            <label class="field">
+              <span>Label</span>
+              <input name="label" required placeholder="e.g. turbo-main" />
+            </label>
+            <label class="field">
+              <span>Backend</span>
+              <select name="backend">
+                <option value="turbo">turbo</option>
+                <option value="direct-arweave">direct-arweave</option>
+                <option value="arlocal">arlocal</option>
+              </select>
+            </label>
+            <label class="field grow" style="flex: 1 1 280px">
+              <span>Arweave address</span>
+              <input name="address" required class="mono" />
+            </label>
+            <label class="field">
+              <span>Draw scope</span>
+              <select name="scope" data-scope-select>
+                <option value="">instance default</option>
+                <option value="service">service — any account</option>
+                <option value="operator">operator — registrar only</option>
+                <option value="account">account — one named account</option>
+              </select>
+            </label>
+            <label class="field" data-scope-account hidden>
+              <span>Granted account</span>
+              <select name="scope_account_id"></select>
+            </label>
+            <label class="field grow" style="flex: 1 1 240px">
+              <span>Root credential</span>
+              <input
+                name="root"
+                type="password"
+                autocomplete="off"
+                placeholder="ctl_… (empty = use session token)"
+              />
+            </label>
+            <button type="submit">Register source</button>
+          </form>
+          <div id="sto-register-flash"></div>
+        </div>
+      </section>
+
+      <!-- =========================== Webhooks =========================== -->
+      <section role="tabpanel" id="tab-webhooks" aria-label="Webhooks" hidden>
+        <div class="bar">
+          <h2>Webhooks</h2>
+          <span class="grow"></span>
+          <button type="button" class="ghost" id="wh-refresh">Refresh</button>
+        </div>
+        <p class="status" id="wh-status" role="status" aria-live="polite"></p>
+        <div id="wh-flash"></div>
+        <div id="wh-disabled" hidden></div>
+
+        <div id="wh-content">
+          <div class="card">
+            <h3>Delivery health</h3>
+            <p class="hint">Worst-first across this operator's subscriptions.</p>
+            <table class="r" aria-label="Webhook health">
+              <thead>
+                <tr>
+                  <th scope="col">Endpoint</th>
+                  <th scope="col">Scope</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" class="num">Consecutive failures</th>
+                  <th scope="col" class="num">Dead</th>
+                  <th scope="col" class="num">Pending</th>
+                  <th scope="col">Oldest pending</th>
+                  <th scope="col">Last success</th>
+                </tr>
+              </thead>
+              <tbody id="wh-health-rows"></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <h3>Firehose subscriptions</h3>
+            <table class="r" aria-label="Webhook endpoints">
+              <thead>
+                <tr>
+                  <th scope="col">Endpoint</th>
+                  <th scope="col">Events</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Secret</th>
+                  <th scope="col" class="num">Failures</th>
+                  <th scope="col"><span hidden>Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="wh-rows"></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <h3>Register endpoint</h3>
+            <p class="hint">
+              The URL passes the egress (SSRF) guard. The signing secret is returned exactly once;
+              deliveries are Standard-Webhooks signed.
+            </p>
+            <form id="wh-register-form" class="inline-form">
+              <label class="field grow" style="flex: 1 1 280px">
+                <span>Delivery URL</span>
+                <input name="url" type="url" required placeholder="https://example.com/hooks" />
+              </label>
+              <label class="field">
+                <span>Label (optional)</span>
+                <input name="label" />
+              </label>
+              <label class="field grow" style="flex: 1 1 220px">
+                <span>Event filter (comma-separated)</span>
+                <input name="events" placeholder="empty = all events" />
+              </label>
+              <button type="submit">Register</button>
+            </form>
+            <div id="wh-register-flash"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================= Audit ============================ -->
+      <section role="tabpanel" id="tab-audit" aria-label="Audit" hidden>
+        <div class="bar">
+          <h2>Audit</h2>
+          <span class="grow"></span>
+        </div>
+        <p class="status" id="aud-status" role="status" aria-live="polite"></p>
+        <div id="aud-flash"></div>
+
+        <div class="card">
+          <form id="aud-filter-form" class="inline-form">
+            <label class="field">
+              <span>Actor</span>
+              <select name="actor_kind">
+                <option value="">all</option>
+                <option value="operator">operator</option>
+                <option value="account">account</option>
+                <option value="system">system</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Action</span>
+              <input name="action" placeholder="exact, e.g. account.disable" />
+            </label>
+            <label class="field">
+              <span>Target type</span>
+              <input name="target_type" placeholder="e.g. account" />
+            </label>
+            <label class="field">
+              <span>Target id</span>
+              <input name="target_id" class="mono" />
+            </label>
+            <label class="field">
+              <span>Limit</span>
+              <select name="limit">
+                <option>25</option>
+                <option selected>50</option>
+                <option>100</option>
+                <option>200</option>
+              </select>
+            </label>
+            <button type="submit" class="ghost">Apply</button>
+          </form>
+          <table class="r" aria-label="Audit log" style="margin-top: 12px">
+            <thead>
+              <tr>
+                <th scope="col">When</th>
+                <th scope="col">Actor</th>
+                <th scope="col">Action</th>
+                <th scope="col">Target</th>
+                <th scope="col"><span hidden>Details</span></th>
+              </tr>
+            </thead>
+            <tbody id="aud-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Chain provider usage</h3>
+          <p class="hint">
+            Per-day request counts the chain egress gate recorded — instance diagnostics, no
+            per-account data.
+          </p>
+          <form id="prov-form" class="inline-form" style="margin-bottom: 10px">
+            <label class="field">
+              <span>Window</span>
+              <select name="days">
+                <option value="7" selected>7 days</option>
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </label>
+            <button type="submit" class="ghost sm">Load</button>
+          </form>
+          <table class="r" aria-label="Chain provider usage">
+            <thead>
+              <tr>
+                <th scope="col">Day</th>
+                <th scope="col">Provider</th>
+                <th scope="col">Network</th>
+                <th scope="col" class="num">Requests</th>
+                <th scope="col" class="num">Denied</th>
+              </tr>
+            </thead>
+            <tbody id="prov-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="foot-row">
+        <span
+          ><strong>Label 309 Gateway</strong> — reference gateway for the Label 309
+          proof-of-existence standard.</span
+        >
+        <span class="grow"></span>
+        <a href="https://label309.org" target="_blank" rel="noopener">label309.org</a>
+        <a href="https://github.com/cardanowall" target="_blank" rel="noopener"
+          >github.com/cardanowall</a
+        >
+        <span id="cp-version"></span>
+      </div>
+      <div class="foot-row" style="margin-top: 4px">
+        <span
+          >Served from this gateway — a single static page, no external requests, no
+          telemetry.</span
+        >
+      </div>
+    </footer>
+
+    <script>
+      (() => {
+        'use strict';
+
+        /* ------------------------------------------------------------------
+         * Tiny utilities.
+         * ---------------------------------------------------------------- */
+        const $ = (sel, root) => (root || document).querySelector(sel);
+        const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+        // Every server-supplied string is escaped before it touches innerHTML.
+        function esc(s) {
+          return String(s == null ? '' : s).replace(
+            /[&<>"']/g,
+            (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+          );
+        }
+
+        const usdFmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
+        const dtFmt = new Intl.DateTimeFormat(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+
+        function usd(micros) {
+          if (micros == null) return '—';
+          const n = Number(micros) / 1e6;
+          return usdFmt.format(n);
+        }
+
+        // Exact decimal-dollars -> integer micro-USD (no float rounding).
+        function dollarsToMicros(s) {
+          const m = /^([+-]?)(\d*)(?:\.(\d{1,6}))?$/.exec(String(s).trim());
+          if (!m || (!m[2] && !m[3])) return null;
+          const sign = m[1] === '-' ? -1 : 1;
+          return sign * (Number(m[2] || 0) * 1e6 + Number((m[3] || '').padEnd(6, '0') || 0));
+        }
+
+        // Exact decimal-AR -> winston decimal string (1 AR = 1e12 winston).
+        function arToWinston(s) {
+          const m = /^(\d*)(?:\.(\d{1,12}))?$/.exec(String(s).trim());
+          if (!m || (!m[1] && !m[2])) return null;
+          return (
+            BigInt(m[1] || 0) * 1000000000000n +
+            BigInt((m[2] || '').padEnd(12, '0') || 0)
+          ).toString();
+        }
+
+        function groupDigits(s) {
+          return String(s).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        function winstonToAr(w) {
+          if (w == null) return '—';
+          let b;
+          try {
+            b = BigInt(w);
+          } catch {
+            return String(w);
+          }
+          const neg = b < 0n;
+          if (neg) b = -b;
+          const i = b / 1000000000000n;
+          const f = (b % 1000000000000n).toString().padStart(12, '0').replace(/0+$/, '');
+          return (neg ? '-' : '') + groupDigits(i) + (f ? '.' + f : '');
+        }
+
+        function fmtInt(n) {
+          if (n == null) return '—';
+          if (typeof n === 'string') return groupDigits(n);
+          return Number(n).toLocaleString();
+        }
+
+        function fmtBytes(n) {
+          if (n == null) return '—';
+          let v = Number(n);
+          const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+          let u = 0;
+          while (v >= 1024 && u < units.length - 1) {
+            v /= 1024;
+            u++;
+          }
+          return (u === 0 ? v : v.toFixed(v >= 10 ? 1 : 2)) + ' ' + units[u];
+        }
+
+        function rel(d) {
+          const ms = d.getTime() - Date.now();
+          const past = ms <= 0;
+          let s = Math.round(Math.abs(ms) / 1000);
+          let out;
+          if (s < 45) out = s + 's';
+          else if (s < 2700) out = Math.round(s / 60) + 'm';
+          else if (s < 86400 * 1.5) out = Math.round(s / 3600) + 'h';
+          else out = Math.round(s / 86400) + 'd';
+          return past ? out + ' ago' : 'in ' + out;
+        }
+
+        function timeCell(iso) {
+          if (!iso) return '<span class="muted">—</span>';
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return esc(String(iso));
+          return (
+            '<span class="time" title="' +
+            esc(d.toISOString()) +
+            '">' +
+            esc(dtFmt.format(d)) +
+            '<small>' +
+            esc(rel(d)) +
+            '</small></span>'
+          );
+        }
+
+        function shortMid(s) {
+          s = String(s);
+          return s.length <= 17 ? s : s.slice(0, 8) + '…' + s.slice(-6);
+        }
+
+        /* ------------------------------------------------------------------
+         * Reusable fragments.
+         * ---------------------------------------------------------------- */
+        const ICON_COPY =
+          '<svg class="ic ic-copy" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="5.2" y="5.2" width="8.3" height="8.3" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.8 3.4V3a1.6 1.6 0 0 0-1.6-1.6H3A1.6 1.6 0 0 0 1.4 3v6.2A1.6 1.6 0 0 0 3 10.8h.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+        const ICON_CHECK =
+          '<svg class="ic ic-check" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 8.6l3.2 3.2L13 4.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        function copyBtn(value, label) {
+          return (
+            '<button type="button" class="copy" data-copy="' +
+            esc(value) +
+            '" aria-label="' +
+            esc(label || 'Copy to clipboard') +
+            '" title="Copy">' +
+            ICON_COPY +
+            ICON_CHECK +
+            '</button>'
+          );
+        }
+
+        function idCell(v, label) {
+          if (v == null || v === '') return '<span class="muted">—</span>';
+          return (
+            '<span class="idwrap"><code title="' +
+            esc(v) +
+            '">' +
+            esc(shortMid(v)) +
+            '</code>' +
+            copyBtn(v, label) +
+            '</span>'
+          );
+        }
+
+        const TONES = {
+          active: 'ok',
+          registered: 'ok',
+          delivered: 'ok',
+          draining: 'warn',
+          paused: 'warn',
+          pending: 'warn',
+          submitted: 'warn',
+          signed: 'warn',
+          disabled: 'danger',
+          retired: 'danger',
+          failed: 'danger',
+          submit_failed: 'danger',
+          revoked: 'danger',
+          operator: 'accent',
+          account: 'neutral',
+          system: 'neutral',
+        };
+        function badge(s, toneOverride) {
+          if (s == null || s === '') return '<span class="muted">—</span>';
+          const tone = toneOverride || TONES[String(s)] || 'neutral';
+          return '<span class="badge" data-tone="' + esc(tone) + '">' + esc(String(s)) + '</span>';
+        }
+
+        // `emptyLabel` is the meaning of an empty array AT THIS CALL SITE, and the
+        // two meanings are opposites: an empty webhook event filter means "all
+        // events", but an empty credential/token scope set means "no scopes"
+        // (deny-all in the backend's set-membership check). Rendering deny-all as
+        // "all" would dangerously misreport a credential that authorizes nothing,
+        // so scope call sites pass 'none' explicitly while the default stays 'all'
+        // for the event-filter site.
+        function chips(arr, emptyLabel) {
+          if (!arr || !arr.length)
+            return '<span class="muted">' + esc(emptyLabel || 'all') + '</span>';
+          return arr.map((s) => '<span class="chip">' + esc(s) + '</span>').join('');
+        }
+
+        function problemHtml(e) {
+          const p = (e && e.problem) || { title: String((e && e.message) || e), detail: '' };
+          let meta = '';
+          if (p.code || p.trace_id) {
+            meta =
+              '<small>' +
+              (p.code ? 'code ' + esc(p.code) : '') +
+              (p.code && p.trace_id ? ' · ' : '') +
+              (p.trace_id ? 'trace ' + esc(p.trace_id) : '') +
+              '</small>';
+          }
+          return (
+            '<div class="problem" role="alert"><strong>' +
+            esc(p.title) +
+            '</strong>' +
+            (p.detail ? '<div>' + esc(p.detail) + '</div>' : '') +
+            meta +
+            '</div>'
+          );
+        }
+
+        function notice(html, tone) {
+          return (
+            '<div class="notice"' +
+            (tone ? ' data-tone="' + tone + '"' : '') +
+            '>' +
+            html +
+            '</div>'
+          );
+        }
+
+        function emptyRow(cols, title, hint) {
+          return (
+            '<tr><td colspan="' +
+            cols +
+            '"><div class="empty-state"><b>' +
+            esc(title) +
+            '</b>' +
+            esc(hint || '') +
+            '</div></td></tr>'
+          );
+        }
+
+        function secretPanel(title, value, extraHtml) {
+          return (
+            '<div class="secret-panel" role="alert"><div class="secret-head">' +
+            '<strong>' +
+            esc(title) +
+            '</strong>' +
+            '<button type="button" class="ghost sm" data-dismiss>Dismiss</button></div>' +
+            '<p class="secret-note">Shown once — copy it now. It is not stored and cannot be recovered.</p>' +
+            '<div class="secret-value"><code>' +
+            esc(value) +
+            '</code>' +
+            copyBtn(value, 'Copy secret') +
+            '</div>' +
+            (extraHtml ? '<div class="secret-meta">' + extraHtml + '</div>' : '') +
+            '</div>'
+          );
+        }
+
+        function setStatus(prefix, msg) {
+          const n = document.getElementById(prefix + '-status');
+          if (n) n.textContent = msg || '';
+        }
+        function setFlash(id, html) {
+          const n = document.getElementById(id);
+          if (n) n.innerHTML = html || '';
+        }
+        // Shown-once secrets append rather than replace, so minting a second
+        // credential can never wipe an uncopied first one; each panel carries
+        // its own Dismiss.
+        function appendFlash(id, html) {
+          const n = document.getElementById(id);
+          if (n) n.insertAdjacentHTML('beforeend', html);
+        }
+        // Refresh sweep for flash regions that can hold shown-once secrets:
+        // drop stale problems and notices, never an undismissed secret panel.
+        function sweepFlash(id) {
+          const n = document.getElementById(id);
+          if (n) $$('.problem, .notice', n).forEach((x) => x.remove());
+        }
+        function showProblem(id, e) {
+          setFlash(id, problemHtml(e));
+        }
+        // Problem reporting for regions that can hold shown-once secrets:
+        // replace any earlier problem but leave secret panels standing.
+        function reportProblem(id, e) {
+          sweepFlash(id);
+          appendFlash(id, problemHtml(e));
+        }
+
+        /* ------------------------------------------------------------------
+         * Session token + API client. The control plane answers RFC 7807
+         * problems; failures surface title + detail + trace id.
+         * ---------------------------------------------------------------- */
+        const TOKEN_KEY = 'gateway_admin_token';
+        const tokenInput = $('#token');
+        const connEl = $('#conn');
+
+        function sessionToken() {
+          return (sessionStorage.getItem(TOKEN_KEY) || '').trim();
+        }
+
+        async function api(method, path, body, tokenOverride) {
+          const headers = { authorization: 'Bearer ' + (tokenOverride || sessionToken()) };
+          if (body !== undefined) headers['content-type'] = 'application/json';
+          let res;
+          try {
+            res = await fetch('/control/v1' + path, {
+              method,
+              headers,
+              body: body !== undefined ? JSON.stringify(body) : undefined,
+            });
+          } catch (netErr) {
+            const e = new Error('network');
+            e.problem = {
+              title: 'Network error',
+              detail: 'Could not reach the control plane: ' + String(netErr && netErr.message),
+            };
+            throw e;
+          }
+          if (res.status === 204) return null;
+          const text = await res.text();
+          let json = null;
+          if (text) {
+            try {
+              json = JSON.parse(text);
+            } catch {
+              /* non-JSON body */
+            }
+          }
+          if (!res.ok) {
+            const p = json || {};
+            const e = new Error(p.title || 'HTTP ' + res.status);
+            e.problem = {
+              status: res.status,
+              title: p.title || 'HTTP ' + res.status,
+              detail: p.detail || '',
+              code: p.code || '',
+              trace_id: p.trace_id || '',
+            };
+            throw e;
+          }
+          return json;
+        }
+
+        /* ------------------------------------------------------------------
+         * Global delegated handlers: copy-to-clipboard, panel dismiss, and
+         * "use this minted token for the session".
+         * ---------------------------------------------------------------- */
+        document.addEventListener('click', (e) => {
+          const copy = e.target.closest('[data-copy]');
+          if (copy) {
+            const v = copy.getAttribute('data-copy');
+            const done = () => {
+              copy.classList.add('copied');
+              setTimeout(() => copy.classList.remove('copied'), 1200);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(v).then(done, done);
+            } else {
+              const ta = document.createElement('textarea');
+              ta.value = v;
+              document.body.appendChild(ta);
+              ta.select();
+              try {
+                document.execCommand('copy');
+              } catch {
+                /* best effort */
+              }
+              ta.remove();
+              done();
+            }
+            return;
+          }
+          const dismiss = e.target.closest('[data-dismiss]');
+          if (dismiss) {
+            const panel = dismiss.closest('.secret-panel, .notice');
+            if (panel) panel.remove();
+            return;
+          }
+          const useTok = e.target.closest('[data-use-token]');
+          if (useTok) {
+            const t = useTok.getAttribute('data-use-token');
+            sessionStorage.setItem(TOKEN_KEY, t);
+            tokenInput.value = t;
+            connect();
+          }
+        });
+
+        /* ------------------------------------------------------------------
+         * Confirm helpers. Destructive/money actions never fire on the first
+         * click: a button arms into an inline confirm pair, and money forms
+         * use a two-step submit whose label restates the converted amount.
+         * ---------------------------------------------------------------- */
+        function armConfirm(btn, onYes, label) {
+          const prevHandler = btn.onclick;
+          const prevText = btn.textContent;
+          btn.textContent = label || 'Confirm';
+          btn.classList.add('confirming');
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'ghost sm';
+          cancel.textContent = 'Cancel';
+          btn.after(cancel);
+          const restore = () => {
+            btn.onclick = prevHandler;
+            btn.textContent = prevText;
+            btn.classList.remove('confirming');
+            cancel.remove();
+          };
+          cancel.onclick = restore;
+          btn.onclick = () => {
+            restore();
+            onYes();
+          };
+        }
+
+        function twoStepSubmit(form, buildLabel, onConfirm) {
+          const btn = form.querySelector('button[type="submit"]');
+          btn.dataset.label = btn.textContent;
+          form.addEventListener('input', () => {
+            btn.dataset.stage = '';
+            btn.classList.remove('confirming');
+            btn.textContent = btn.dataset.label;
+          });
+          form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (btn.dataset.stage !== '2') {
+              const label = buildLabel();
+              if (label == null) return;
+              btn.dataset.stage = '2';
+              btn.classList.add('confirming');
+              btn.textContent = label;
+              return;
+            }
+            btn.dataset.stage = '';
+            btn.classList.remove('confirming');
+            btn.textContent = btn.dataset.label;
+            onConfirm();
+          });
+        }
+
+        // One expandable detail row per table row, keyed so the same button
+        // toggles its panel closed.
+        function toggleDetail(tr, key, html) {
+          const next = tr.nextElementSibling;
+          if (next && next.classList.contains('detail-row')) {
+            const wasOpen = next.dataset.key === key;
+            next.remove();
+            if (wasOpen) return null;
+          }
+          const dr = document.createElement('tr');
+          dr.className = 'detail-row';
+          dr.dataset.key = key;
+          const td = document.createElement('td');
+          td.colSpan = tr.children.length;
+          td.innerHTML = html;
+          dr.appendChild(td);
+          tr.after(dr);
+          return dr;
+        }
+
+        /* ------------------------------------------------------------------
+         * Scope catalogue + shared account cache.
+         * ---------------------------------------------------------------- */
+        let SCOPES = [
+          'account:read',
+          'billing:read',
+          'poe:create',
+          'poe:read',
+          'webhooks:read',
+          'webhooks:write',
+        ];
+        let ACCOUNTS = [];
+
+        async function loadScopeCatalogue() {
+          try {
+            const res = await fetch('/control/v1/openapi.json');
+            if (!res.ok) return;
+            const doc = await res.json();
+            if (doc && doc.info && doc.info.version) {
+              $('#cp-version').textContent = 'control plane v' + doc.info.version;
+            }
+            const items =
+              doc &&
+              doc.paths &&
+              doc.paths['/control/v1/accounts/{account_id}/keys'] &&
+              doc.paths['/control/v1/accounts/{account_id}/keys'].post.requestBody.content[
+                'application/json'
+              ].schema.properties.scopes.items;
+            if (items && Array.isArray(items.enum) && items.enum.length) SCOPES = items.enum;
+          } catch {
+            /* the hardcoded core catalogue stands in */
+          }
+        }
+
+        async function loadAccounts() {
+          const data = await api('GET', '/accounts?limit=200');
+          ACCOUNTS = data.data || [];
+        }
+
+        function accountOptions(selected) {
+          return ACCOUNTS.map(
+            (a) =>
+              '<option value="' +
+              esc(a.account_id) +
+              '"' +
+              (a.account_id === selected ? ' selected' : '') +
+              '>' +
+              esc(shortMid(a.account_id)) +
+              ' · ' +
+              esc(a.status) +
+              ' · ' +
+              esc(usd(a.balance_usd_micros)) +
+              '</option>',
+          ).join('');
+        }
+
+        function scopeCheckboxes(containerId) {
+          $('#' + containerId).innerHTML = SCOPES.map(
+            (s) =>
+              '<label class="check"><input type="checkbox" value="' +
+              esc(s) +
+              '"><span>' +
+              esc(s) +
+              '</span></label>',
+          ).join('');
+        }
+
+        function checkedScopes(containerId) {
+          return $$('#' + containerId + ' input:checked').map((i) => i.value);
+        }
+
+        // Wire the scope-select -> account picker pairs on the register forms.
+        $$('form').forEach((form) => {
+          const sel = form.querySelector('[data-scope-select]');
+          const acct = form.querySelector('[data-scope-account]');
+          if (sel && acct) {
+            sel.addEventListener('change', () => {
+              acct.hidden = sel.value !== 'account';
+              if (!acct.hidden) acct.querySelector('select').innerHTML = accountOptions();
+            });
+          }
+        });
+
+        /* ------------------------------------------------------------------
+         * Tabs.
+         * ---------------------------------------------------------------- */
+        const TAB_LOADERS = {
+          accounts: renderAccounts,
+          keys: renderKeysTab,
+          wallets: renderWallets,
+          storage: renderStorage,
+          webhooks: renderWebhooks,
+          audit: renderAudit,
+        };
+        const STATUS_PREFIX = {
+          accounts: 'acc',
+          keys: 'key',
+          wallets: 'wal',
+          storage: 'sto',
+          webhooks: 'wh',
+          audit: 'aud',
+        };
+        const loadedTabs = new Set();
+        let currentTab = 'accounts';
+
+        function switchTab(name) {
+          currentTab = name;
+          $$('nav [role="tab"]').forEach((b) => {
+            const on = b.dataset.tab === name;
+            b.setAttribute('aria-selected', String(on));
+          });
+          $$('main [role="tabpanel"]').forEach((s) => {
+            s.hidden = s.id !== 'tab-' + name;
+          });
+          if (location.hash !== '#' + name) {
+            try {
+              history.replaceState(null, '', '#' + name);
+            } catch {
+              /* sandboxed contexts */
+            }
+          }
+          if (sessionToken() && !loadedTabs.has(name)) {
+            loadedTabs.add(name);
+            TAB_LOADERS[name]();
+          } else if (!sessionToken()) {
+            setStatus(
+              STATUS_PREFIX[name],
+              'Not connected — paste an operator token above to load this tab.',
+            );
+          }
+        }
+
+        $$('nav [role="tab"]').forEach((b) => {
+          b.addEventListener('click', () => switchTab(b.dataset.tab));
+        });
+
+        /* ------------------------------------------------------------------
+         * Connection. A successful operator-scope call lights the dot; 401
+         * and 403 are distinguished so a pasted account token explains
+         * itself instead of failing silently tab by tab.
+         * ---------------------------------------------------------------- */
+        async function connect() {
+          const t = tokenInput.value.trim();
+          if (!t) {
+            sessionStorage.removeItem(TOKEN_KEY);
+            connEl.dataset.state = 'off';
+            connEl.textContent = 'Not connected';
+            return;
+          }
+          sessionStorage.setItem(TOKEN_KEY, t);
+          connEl.dataset.state = 'off';
+          connEl.textContent = 'Checking…';
+          try {
+            await loadAccounts();
+            connEl.dataset.state = 'ok';
+            connEl.textContent = 'Operator connected';
+            loadedTabs.clear();
+            loadedTabs.add(currentTab);
+            loadScopeCatalogue().then(() => {
+              scopeCheckboxes('key-scope-boxes');
+              scopeCheckboxes('tok-scope-boxes');
+            });
+            TAB_LOADERS[currentTab]();
+          } catch (e) {
+            const st = e.problem && e.problem.status;
+            connEl.dataset.state = 'err';
+            connEl.textContent =
+              st === 401
+                ? 'Invalid token'
+                : st === 403
+                  ? 'Token lacks operator authority'
+                  : 'Unreachable';
+          }
+        }
+
+        $('#token-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          connect();
+        });
+
+        /* ==================================================================
+         * Accounts.
+         * ================================================================ */
+        const accRows = $('#acc-rows');
+
+        async function renderAccounts() {
+          setStatus('acc', 'Loading accounts…');
+          setFlash('acc-flash', '');
+          try {
+            await loadAccounts();
+            accRows.innerHTML = ACCOUNTS.length
+              ? ACCOUNTS.map(
+                  (a) =>
+                    '<tr data-id="' +
+                    esc(a.account_id) +
+                    '">' +
+                    '<td data-th="Account">' +
+                    idCell(a.account_id) +
+                    '</td>' +
+                    '<td data-th="Status">' +
+                    badge(a.status) +
+                    '</td>' +
+                    '<td data-th="Balance" class="num"><span class="money" title="' +
+                    esc(a.balance_usd_micros) +
+                    ' micro-USD">' +
+                    esc(usd(a.balance_usd_micros)) +
+                    '</span></td>' +
+                    '<td data-th="Created">' +
+                    timeCell(a.created_at) +
+                    '</td>' +
+                    '<td class="actions">' +
+                    '<button type="button" class="ghost sm" data-act="usage">Usage</button>' +
+                    '<button type="button" class="ghost sm" data-act="margin">Margin</button>' +
+                    '<button type="button" class="ghost sm" data-act="fund">Fund</button>' +
+                    (a.status === 'active'
+                      ? '<button type="button" class="danger sm" data-act="disable">Disable</button>'
+                      : '<button type="button" class="ghost sm" data-act="enable">Enable</button>') +
+                    '</td></tr>',
+                ).join('')
+              : emptyRow(5, 'No accounts yet', 'Create the first one with the button above.');
+            wireAccountRows();
+            setStatus('acc', '');
+          } catch (e) {
+            setStatus('acc', '');
+            showProblem('acc-flash', e);
+          }
+        }
+
+        function wireAccountRows() {
+          $$('#acc-rows tr[data-id]').forEach((tr) => {
+            const id = tr.dataset.id;
+            $$('button[data-act]', tr).forEach((btn) => {
+              const act = btn.dataset.act;
+              btn.onclick = () => {
+                if (act === 'usage') openUsage(tr, id);
+                else if (act === 'margin') openMargin(tr, id);
+                else if (act === 'fund') openFund(tr, id);
+                else openToggle(tr, id, act);
+              };
+            });
+          });
+        }
+
+        async function openUsage(tr, id) {
+          const dr = toggleDetail(tr, 'usage', '<p class="muted">Loading usage…</p>');
+          if (!dr) return;
+          try {
+            const u = await api('GET', '/accounts/' + id + '/usage');
+            dr.firstElementChild.innerHTML =
+              '<div class="stats">' +
+              '<div class="stat"><div class="v">' +
+              esc(usd(u.balance_usd_micros)) +
+              '</div><div class="k">Balance</div></div>' +
+              '<div class="stat"><div class="v">' +
+              esc(fmtInt(u.ledger_entry_count)) +
+              '</div><div class="k">Ledger entries</div></div>' +
+              '<div class="stat"><div class="v">' +
+              esc(fmtInt(u.quote_count)) +
+              '</div><div class="k">Quotes</div></div>' +
+              '<div class="stat"><div class="v">' +
+              esc(fmtInt(u.publish_count)) +
+              '</div><div class="k">Publishes</div></div>' +
+              '</div>';
+          } catch (e) {
+            dr.firstElementChild.innerHTML = problemHtml(e);
+          }
+        }
+
+        function openMargin(tr, id) {
+          const dr = toggleDetail(
+            tr,
+            'margin',
+            '<form class="inline-form">' +
+              '<label class="field"><span>Margin override (%)</span>' +
+              '<input name="pct" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 25" required></label>' +
+              '<button type="submit" class="sm">Set override</button>' +
+              '<button type="button" class="ghost sm" data-clear>Clear override</button>' +
+              '<p class="form-note">The pricing seam prefers this override to the operator-default margin. ' +
+              'Clearing reverts to the default. The control plane stores override-or-default only (no read-back).</p>' +
+              '<div class="flash"></div></form>',
+          );
+          if (!dr) return;
+          const form = $('form', dr);
+          const flash = $('.flash', dr);
+          form.onsubmit = async (e) => {
+            e.preventDefault();
+            const pct = parseFloat(form.elements.pct.value);
+            if (!(pct >= 0)) return;
+            const margin_pct = Math.round(pct * 10000) / 1000000;
+            try {
+              const out = await api('PUT', '/accounts/' + id + '/margin', { margin_pct });
+              flash.innerHTML = notice(
+                'Override set: <strong>' +
+                  esc(pct) +
+                  '%</strong> (margin_pct ' +
+                  esc(out.margin_pct) +
+                  ', source ' +
+                  esc(out.margin_source) +
+                  ')',
+                'ok',
+              );
+            } catch (err) {
+              flash.innerHTML = problemHtml(err);
+            }
+          };
+          const clearBtn = $('[data-clear]', dr);
+          clearBtn.onclick = () =>
+            armConfirm(clearBtn, async () => {
+              try {
+                const out = await api('DELETE', '/accounts/' + id + '/margin');
+                flash.innerHTML = notice(
+                  (out.cleared ? 'Override cleared' : 'No override was set') +
+                    ' — account now uses the ' +
+                    esc(out.margin_source) +
+                    ' margin.',
+                  'ok',
+                );
+              } catch (err) {
+                flash.innerHTML = problemHtml(err);
+              }
+            });
+        }
+
+        function openFund(tr, id) {
+          const dr = toggleDetail(
+            tr,
+            'fund',
+            '<form class="inline-form">' +
+              '<label class="field"><span>Amount (USD)</span>' +
+              '<input name="amount" inputmode="decimal" required placeholder="10.00">' +
+              '<small>Negative = debit</small></label>' +
+              '<label class="field grow" style="flex:1 1 220px"><span>Reason (recorded in the ledger)</span>' +
+              '<input name="reason" required minlength="3" placeholder="e.g. welcome grant"></label>' +
+              '<label class="field"><span>Idempotency ref (optional)</span>' +
+              '<input name="ref" placeholder="auto"></label>' +
+              '<button type="submit" class="sm">Apply adjustment</button>' +
+              '<p class="form-note preview" aria-live="polite">Amount is entered in dollars and sent as micro-USD.</p>' +
+              '<div class="flash"></div></form>',
+          );
+          if (!dr) return;
+          const form = $('form', dr);
+          const preview = $('.preview', dr);
+          const flash = $('.flash', dr);
+          const micros = () => dollarsToMicros(form.elements.amount.value);
+          form.elements.amount.addEventListener('input', () => {
+            const m = micros();
+            preview.textContent =
+              m == null
+                ? 'Enter a dollar amount (up to 6 decimals).'
+                : 'Will send amount_usd_micros = ' +
+                  fmtInt(m) +
+                  ' — a ' +
+                  usd(Math.abs(m)) +
+                  (m < 0 ? ' debit.' : ' credit.');
+          });
+          twoStepSubmit(
+            form,
+            () => {
+              const m = micros();
+              if (m == null || m === 0) {
+                flash.innerHTML = notice('Enter a non-zero dollar amount.', 'warn');
+                return null;
+              }
+              flash.innerHTML = '';
+              return 'Confirm ' + usd(Math.abs(m)) + (m < 0 ? ' debit' : ' credit');
+            },
+            async () => {
+              const m = micros();
+              const body = {
+                amount_usd_micros: m,
+                reason: form.elements.reason.value.trim(),
+              };
+              const ref = form.elements.ref.value.trim();
+              if (ref) body.ref = ref;
+              try {
+                const out = await api('POST', '/accounts/' + id + '/ledger-adjustment', body);
+                await renderAccounts();
+                setFlash(
+                  'acc-flash',
+                  notice(
+                    'Adjusted ' +
+                      esc(shortMid(id)) +
+                      ' by ' +
+                      esc(usd(m)) +
+                      (out.applied === false
+                        ? ' — duplicate ref, already applied earlier (no-op).'
+                        : '.'),
+                    'ok',
+                  ),
+                );
+              } catch (err) {
+                flash.innerHTML = problemHtml(err);
+              }
+            },
+          );
+        }
+
+        function openToggle(tr, id, action) {
+          const verb = action === 'disable' ? 'Disable account' : 'Enable account';
+          const dr = toggleDetail(
+            tr,
+            'toggle',
+            '<form class="inline-form">' +
+              '<label class="field grow" style="flex:1 1 240px"><span>Reason (optional, recorded in audit)</span>' +
+              '<input name="reason"></label>' +
+              '<button type="submit" class="' +
+              (action === 'disable' ? 'danger' : '') +
+              ' sm">' +
+              esc(verb) +
+              '</button>' +
+              '<button type="button" class="ghost sm" data-cancel>Cancel</button>' +
+              '<div class="flash"></div></form>',
+          );
+          if (!dr) return;
+          const form = $('form', dr);
+          $('[data-cancel]', dr).onclick = () => dr.remove();
+          const submit = async () => {
+            const reason = form.elements.reason.value.trim();
+            try {
+              await api('POST', '/accounts/' + id + '/' + action, reason ? { reason } : {});
+              await renderAccounts();
+              setFlash(
+                'acc-flash',
+                notice('Account ' + esc(shortMid(id)) + ' ' + action + 'd.', 'ok'),
+              );
+            } catch (err) {
+              $('.flash', dr).innerHTML = problemHtml(err);
+            }
+          };
+          if (action === 'disable') {
+            // Disable cuts the account off — gate it behind the same two-step
+            // confirm every other destructive action uses. Enable is benign and
+            // submits on the first click.
+            twoStepSubmit(form, () => 'Confirm disable account', submit);
+          } else {
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              submit();
+            };
+          }
+        }
+
+        $('#acc-refresh').onclick = renderAccounts;
+        $('#acc-create').onclick = async () => {
+          setFlash('acc-flash', '');
+          try {
+            const a = await api('POST', '/accounts');
+            await renderAccounts();
+            setFlash(
+              'acc-flash',
+              notice('Account created: ' + idCell(a.account_id, 'Copy account id'), 'ok'),
+            );
+          } catch (e) {
+            showProblem('acc-flash', e);
+          }
+        };
+
+        /* ==================================================================
+         * Keys & tokens.
+         * ================================================================ */
+        const keyAccSel = $('#key-acc');
+
+        async function renderKeysTab() {
+          setStatus('key', 'Loading…');
+          try {
+            if (!ACCOUNTS.length) await loadAccounts();
+            const prev = keyAccSel.value;
+            keyAccSel.innerHTML = accountOptions(prev);
+            scopeCheckboxes('key-scope-boxes');
+            scopeCheckboxes('tok-scope-boxes');
+            if (!ACCOUNTS.length) {
+              $('#key-rows').innerHTML = emptyRow(
+                8,
+                'No accounts yet',
+                'Create one in the Accounts tab first.',
+              );
+              setStatus('key', '');
+              return;
+            }
+            await renderKeys();
+          } catch (e) {
+            setStatus('key', '');
+            reportProblem('key-flash', e);
+          }
+        }
+
+        async function renderKeys() {
+          const acc = keyAccSel.value;
+          if (!acc) return;
+          setStatus('key', 'Loading keys…');
+          sweepFlash('key-flash');
+          try {
+            const data = await api('GET', '/accounts/' + acc + '/keys?limit=200');
+            const rows = (data.data || []).map((k) => {
+              const revoked = !!k.revoked_at;
+              return (
+                '<tr data-id="' +
+                esc(k.key_id) +
+                '">' +
+                '<td data-th="Key">' +
+                idCell(k.key_id, 'Copy key id') +
+                '</td>' +
+                '<td data-th="Label">' +
+                (k.label ? esc(k.label) : '<span class="muted">—</span>') +
+                '</td>' +
+                '<td data-th="Scopes">' +
+                chips(k.scopes, 'none') +
+                '</td>' +
+                '<td data-th="Rate / min" class="num">' +
+                (k.rate_limit_per_min == null
+                  ? '<span class="muted">default</span>'
+                  : esc(fmtInt(k.rate_limit_per_min))) +
+                '</td>' +
+                '<td data-th="Created">' +
+                timeCell(k.created_at) +
+                '</td>' +
+                '<td data-th="Last used">' +
+                timeCell(k.last_used_at) +
+                '</td>' +
+                '<td data-th="Status">' +
+                (revoked ? badge('revoked') : badge('active')) +
+                '</td>' +
+                '<td class="actions">' +
+                (revoked
+                  ? ''
+                  : '<button type="button" class="ghost sm" data-act="relabel">Relabel</button>' +
+                    '<button type="button" class="danger sm" data-act="revoke">Revoke</button>') +
+                '</td></tr>'
+              );
+            });
+            $('#key-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(8, 'No API keys', 'Create one below — the secret is shown once.');
+            $$('#key-rows tr[data-id]').forEach((tr) => {
+              const keyId = tr.dataset.id;
+              $$('button[data-act]', tr).forEach((btn) => {
+                if (btn.dataset.act === 'revoke') {
+                  btn.onclick = () =>
+                    armConfirm(
+                      btn,
+                      async () => {
+                        try {
+                          // Revoke declares no request body; send none so the
+                          // request carries no Content-Type the contract forbids.
+                          await api('POST', '/accounts/' + acc + '/keys/' + keyId + '/revoke');
+                          renderKeys();
+                        } catch (e) {
+                          reportProblem('key-flash', e);
+                        }
+                      },
+                      'Revoke key?',
+                    );
+                } else {
+                  btn.onclick = () => {
+                    const dr = toggleDetail(
+                      tr,
+                      'relabel',
+                      '<form class="inline-form">' +
+                        '<label class="field grow" style="flex:1 1 220px"><span>New label</span>' +
+                        '<input name="label" placeholder="empty clears the label"></label>' +
+                        '<button type="submit" class="sm">Save label</button>' +
+                        '<div class="flash"></div></form>',
+                    );
+                    if (!dr) return;
+                    $('form', dr).onsubmit = async (e) => {
+                      e.preventDefault();
+                      const label = $('form', dr).elements.label.value.trim();
+                      try {
+                        await api(
+                          'POST',
+                          '/accounts/' + acc + '/keys/' + keyId + '/relabel',
+                          label ? { label } : {},
+                        );
+                        renderKeys();
+                      } catch (err) {
+                        $('.flash', dr).innerHTML = problemHtml(err);
+                      }
+                    };
+                  };
+                }
+              });
+            });
+            setStatus('key', '');
+          } catch (e) {
+            setStatus('key', '');
+            reportProblem('key-flash', e);
+          }
+        }
+
+        keyAccSel.addEventListener('change', renderKeys);
+        $('#key-refresh').onclick = renderKeysTab;
+
+        $('#key-create-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const acc = keyAccSel.value;
+          const scopes = checkedScopes('key-scope-boxes');
+          const note = $('#key-create-flash');
+          note.textContent = '';
+          if (!acc) {
+            note.textContent = 'Select an account first.';
+            return;
+          }
+          if (!scopes.length) {
+            note.textContent = 'Pick at least one scope — keys must carry a non-empty scope set.';
+            return;
+          }
+          const body = { scopes };
+          const label = form.elements.label.value.trim();
+          if (label) body.label = label;
+          const rate = form.elements.rate.value.trim();
+          if (rate !== '') body.rate_limit_per_min = Number(rate);
+          try {
+            const out = await api('POST', '/accounts/' + acc + '/keys', body);
+            form.reset();
+            // Refresh the roster BEFORE showing the secret: the re-render clears
+            // the flash region, and a shown-once secret must never be wiped.
+            await renderKeys();
+            appendFlash(
+              'key-flash',
+              secretPanel(
+                'API key created',
+                out.secret,
+                '<span>key ' +
+                  idCell(out.key_id, 'Copy key id') +
+                  '</span><span>scopes: ' +
+                  chips(out.scopes, 'none') +
+                  '</span>',
+              ),
+            );
+          } catch (err) {
+            $$('#key-flash .problem').forEach((n) => n.remove());
+            appendFlash('key-flash', problemHtml(err));
+          }
+        });
+
+        $('#tok-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const acc = keyAccSel.value;
+          const note = $('#tok-flash-note');
+          note.textContent = '';
+          if (!acc) {
+            note.textContent = 'Select an account first.';
+            return;
+          }
+          const body = { scopes: checkedScopes('tok-scope-boxes') };
+          const rate = form.elements.rate.value.trim();
+          if (rate !== '') body.rate_limit_per_min = Number(rate);
+          try {
+            const out = await api('POST', '/accounts/' + acc + '/token', body);
+            appendFlash(
+              'key-flash',
+              secretPanel(
+                'Account token minted',
+                out.token,
+                '<span>expires ' +
+                  timeCell(out.expires_at) +
+                  '</span><span>scopes: ' +
+                  chips(out.scopes, 'none') +
+                  '</span>',
+              ),
+            );
+            form.reset();
+          } catch (err) {
+            $$('#key-flash .problem').forEach((n) => n.remove());
+            appendFlash('key-flash', problemHtml(err));
+          }
+        });
+
+        $('#op-token-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const root = form.elements.root.value.trim();
+          if (!root) return;
+          setFlash('op-flash', '');
+          try {
+            const out = await api('POST', '/operator/token', undefined, root);
+            form.reset();
+            setFlash(
+              'op-flash',
+              secretPanel(
+                'Operator token minted',
+                out.token,
+                '<span>expires ' +
+                  timeCell(out.expires_at) +
+                  '</span><button type="button" class="ghost sm" data-use-token="' +
+                  esc(out.token) +
+                  '">Use for this session</button>',
+              ),
+            );
+          } catch (err) {
+            setFlash('op-flash', problemHtml(err));
+          }
+        });
+
+        /* ==================================================================
+         * Wallets.
+         * ================================================================ */
+        async function renderWallets() {
+          setStatus('wal', 'Loading wallets…');
+          setFlash('wal-flash', '');
+          try {
+            const data = await api('GET', '/wallets?limit=200');
+            const rows = (data.data || []).map(
+              (w) =>
+                '<tr data-id="' +
+                esc(w.wallet_id) +
+                '">' +
+                '<td data-th="Wallet"><strong>' +
+                esc(w.label) +
+                '</strong><span class="cell-sub">' +
+                idCell(w.wallet_id, 'Copy wallet id') +
+                '</span></td>' +
+                '<td data-th="Address">' +
+                idCell(w.address, 'Copy address') +
+                '</td>' +
+                '<td data-th="Network">' +
+                badge(w.network) +
+                '</td>' +
+                '<td data-th="Status">' +
+                badge(w.status) +
+                '</td>' +
+                '<td data-th="UTxOs avail / canonical" class="num">' +
+                esc(fmtInt(w.available_utxos)) +
+                ' / ' +
+                esc(fmtInt(w.canonical_utxos)) +
+                '</td>' +
+                '<td data-th="Created">' +
+                timeCell(w.created_at) +
+                '</td>' +
+                '<td class="actions">' +
+                '<button type="button" class="ghost sm" data-act="grants">Grants</button>' +
+                (w.status === 'active'
+                  ? '<button type="button" class="danger sm" data-act="drain">Drain</button>'
+                  : w.status === 'draining'
+                    ? '<button type="button" class="ghost sm" data-act="reactivate">Reactivate</button>'
+                    : '') +
+                '</td></tr>',
+            );
+            $('#wal-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(
+                  7,
+                  'No wallets registered',
+                  'Register a keyring-held address below (root credential required).',
+                );
+            $$('#wal-rows tr[data-id]').forEach((tr) => {
+              const id = tr.dataset.id;
+              $$('button[data-act]', tr).forEach((btn) => {
+                const act = btn.dataset.act;
+                if (act === 'grants') {
+                  btn.onclick = () => openGrants(tr, '/wallets/' + id + '/grants', 'spend');
+                } else {
+                  btn.onclick = () =>
+                    armConfirm(
+                      btn,
+                      async () => {
+                        try {
+                          await api('POST', '/wallets/' + id + '/' + act, {});
+                          renderWallets();
+                        } catch (e) {
+                          showProblem('wal-flash', e);
+                        }
+                      },
+                      act === 'drain' ? 'Drain wallet?' : 'Reactivate?',
+                    );
+                }
+              });
+            });
+            setStatus('wal', '');
+          } catch (e) {
+            setStatus('wal', '');
+            showProblem('wal-flash', e);
+          }
+        }
+
+        // Shared grant box for wallets (spend grants) and storage sources
+        // (draw grants): issue by scope, revoke by grant id. The control
+        // plane has no grant listing, so the box says to keep issued ids.
+        function openGrants(tr, basePath, kind) {
+          const dr = toggleDetail(
+            tr,
+            'grants',
+            '<div class="inline-form" style="margin-bottom:10px">' +
+              '<form class="inline-form" data-issue>' +
+              '<label class="field"><span>Issue ' +
+              kind +
+              ' grant</span><select name="scope">' +
+              '<option value="service">service — everyone</option>' +
+              '<option value="operator">operator — registrar only</option>' +
+              '<option value="account">account — one account</option>' +
+              '</select></label>' +
+              '<label class="field" data-acct hidden><span>Account</span><select name="account_id">' +
+              accountOptions() +
+              '</select></label>' +
+              '<button type="submit" class="sm">Issue</button>' +
+              '</form>' +
+              '<form class="inline-form" data-revoke>' +
+              '<label class="field grow" style="flex:1 1 240px"><span>Revoke grant by id</span>' +
+              '<input name="grant_id" required class="mono" placeholder="grant uuid"></label>' +
+              '<button type="submit" class="danger sm">Revoke</button>' +
+              '</form></div>' +
+              '<p class="form-note">There is no grant listing endpoint — keep grant ids from the ' +
+              'issue and registration responses. Revocation gates new picks only; in-flight work settles.</p>' +
+              '<div class="flash"></div>',
+          );
+          if (!dr) return;
+          const flash = $('.flash', dr);
+          const issueForm = $('[data-issue]', dr);
+          const acctField = $('[data-acct]', dr);
+          issueForm.elements.scope.addEventListener('change', () => {
+            acctField.hidden = issueForm.elements.scope.value !== 'account';
+          });
+          issueForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const body = { scope: issueForm.elements.scope.value };
+            if (body.scope === 'account') body.account_id = issueForm.elements.account_id.value;
+            try {
+              const out = await api('POST', basePath, body);
+              flash.innerHTML = notice(
+                (out.issued === false ? 'Grant already existed: ' : 'Grant issued: ') +
+                  idCell(out.grant_id, 'Copy grant id') +
+                  ' — keep this id to revoke it later.',
+                'ok',
+              );
+            } catch (err) {
+              flash.innerHTML = problemHtml(err);
+            }
+          };
+          const revokeForm = $('[data-revoke]', dr);
+          revokeForm.onsubmit = (e) => {
+            e.preventDefault();
+            const gid = revokeForm.elements.grant_id.value.trim();
+            if (!gid) return;
+            const btn = revokeForm.querySelector('button');
+            armConfirm(
+              btn,
+              async () => {
+                try {
+                  await api('POST', basePath + '/' + gid + '/revoke');
+                  flash.innerHTML = notice('Grant ' + esc(shortMid(gid)) + ' revoked.', 'ok');
+                } catch (err) {
+                  flash.innerHTML = problemHtml(err);
+                }
+              },
+              'Revoke grant?',
+            );
+          };
+        }
+
+        $('#wal-refresh').onclick = renderWallets;
+
+        $('#wal-register-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const body = {
+            label: form.elements.label.value.trim(),
+            address: form.elements.address.value.trim(),
+            network: form.elements.network.value,
+          };
+          if (form.elements.scope.value) {
+            body.scope = form.elements.scope.value;
+            if (body.scope === 'account')
+              body.scope_account_id = form.elements.scope_account_id.value;
+          }
+          const root = form.elements.root.value.trim();
+          setFlash('wal-register-flash', '');
+          try {
+            const out = await api('POST', '/wallets', body, root || undefined);
+            setFlash(
+              'wal-register-flash',
+              notice(
+                'Wallet ' +
+                  (out.created ? 'registered' : 're-asserted') +
+                  ': ' +
+                  idCell(out.wallet_id, 'Copy wallet id') +
+                  ' · auto-issued grant ' +
+                  idCell(out.grant_id, 'Copy grant id') +
+                  ' (keep it — grants have no list endpoint).',
+                'ok',
+              ),
+            );
+            form.elements.root.value = '';
+            renderWallets();
+          } catch (err) {
+            setFlash('wal-register-flash', problemHtml(err));
+          }
+        });
+
+        /* ==================================================================
+         * Storage.
+         * ================================================================ */
+        let STORAGE_SOURCES = [];
+
+        function isStorageNotConfigured(e) {
+          return e && e.problem && e.problem.code === 'storage-not-configured';
+        }
+
+        async function renderStorage() {
+          setStatus('sto', 'Loading storage state…');
+          setFlash('sto-flash', '');
+          $('#sto-unconfigured').hidden = true;
+          await Promise.all([
+            renderFundingSummary(),
+            renderOperatorBalance(),
+            renderSources(),
+            renderTopups(),
+          ]);
+          setStatus('sto', '');
+        }
+
+        async function renderFundingSummary() {
+          const box = $('#sto-funding');
+          box.innerHTML = '<p class="muted">Loading…</p>';
+          try {
+            const f = await api('GET', '/storage/funding');
+            box.innerHTML =
+              '<div class="stats">' +
+              '<div class="stat"><div class="v">' +
+              esc(fmtInt(f.source_count)) +
+              '</div><div class="k">Sources</div></div>' +
+              '<div class="stat"><div class="v" title="winc">' +
+              esc(fmtInt(f.total_winc_balance)) +
+              '</div><div class="k">Total winc</div></div>' +
+              '<div class="stat"><div class="v">' +
+              esc(fmtBytes(f.total_fundable_bytes)) +
+              '</div><div class="k">Fundable</div></div>' +
+              '<div class="stat"><div class="v">' +
+              (f.stale_source_count > 0
+                ? badge(fmtInt(f.stale_source_count) + ' stale', 'warn')
+                : esc('0')) +
+              '</div><div class="k">Stale sources</div></div>' +
+              '</div>';
+          } catch (e) {
+            box.innerHTML = isStorageNotConfigured(e)
+              ? '<p class="muted">Storage is not configured.</p>'
+              : problemHtml(e);
+          }
+        }
+
+        async function renderOperatorBalance() {
+          const box = $('#sto-balance');
+          box.innerHTML = '<p class="muted">Reading live balances…</p>';
+          try {
+            const b = await api('GET', '/storage/operator-balance');
+            if (!b.storage_configured) {
+              showStorageUnconfigured();
+              box.innerHTML = '<p class="muted">No storage backend — nothing to read.</p>';
+              return;
+            }
+            const wallets = (b.wallets || [])
+              .map((w) => {
+                const turbo = w.turbo || {};
+                const turboLine = turbo.available
+                  ? esc(fmtInt(turbo.winc)) +
+                    ' winc · ' +
+                    esc(fmtBytes(turbo.fundable_bytes)) +
+                    ' fundable'
+                  : '<span class="muted">credits unavailable (' +
+                    esc(turbo.reason || 'unknown') +
+                    ')</span>';
+                return (
+                  '<div class="stat"><div class="v" style="font-size:13px">' +
+                  idCell(w.arweave_address, 'Copy Arweave address') +
+                  (w.key_held ? ' ' + badge('key held', 'ok') : ' ' + badge('no key', 'warn')) +
+                  '</div><div class="k">' +
+                  esc(w.key_label || 'funding wallet') +
+                  '</div>' +
+                  '<div style="margin-top:6px;font-size:12.5px">' +
+                  (w.ar_balance_winston != null
+                    ? '<strong>' + esc(winstonToAr(w.ar_balance_winston)) + ' AR</strong> on-chain'
+                    : '<span class="muted">AR balance unavailable' +
+                      (w.ar_balance_error ? ': ' + esc(w.ar_balance_error) : '') +
+                      '</span>') +
+                  '<br>' +
+                  turboLine +
+                  '</div></div>'
+                );
+              })
+              .join('');
+            const topup = b.top_up || {};
+            box.innerHTML =
+              '<p class="hint" style="margin-bottom:8px">backend ' +
+              badge(b.backend, 'accent') +
+              ' · read ' +
+              timeCell(b.fetched_at) +
+              (topup.enabled
+                ? ''
+                : ' · top-up unavailable: ' + badge(topup.reason || 'unknown', 'warn')) +
+              '</p>' +
+              (wallets
+                ? '<div class="stats">' + wallets + '</div>'
+                : '<p class="muted">No funding wallets.</p>');
+          } catch (e) {
+            if (isStorageNotConfigured(e)) {
+              showStorageUnconfigured();
+              box.innerHTML = '<p class="muted">No storage backend — nothing to read.</p>';
+            } else {
+              box.innerHTML = problemHtml(e);
+            }
+          }
+        }
+
+        function showStorageUnconfigured() {
+          const n = $('#sto-unconfigured');
+          n.hidden = false;
+          n.innerHTML = notice(
+            '<strong>Storage is not configured on this deployment.</strong> This gateway anchors ' +
+              'content hashes only — publishes work, uploads are off. To enable funded uploads, add a ' +
+              '<code>[storage]</code> section to the gateway config and an Arweave key to the keyring, ' +
+              'then register it below with the root credential.',
+          );
+        }
+
+        async function renderSources() {
+          try {
+            const data = await api('GET', '/storage/sources?limit=200');
+            STORAGE_SOURCES = data.data || [];
+          } catch (e) {
+            STORAGE_SOURCES = [];
+            if (!isStorageNotConfigured(e)) showProblem('sto-flash', e);
+          }
+          const rows = STORAGE_SOURCES.map(
+            (s) =>
+              '<tr data-id="' +
+              esc(s.source_id) +
+              '">' +
+              '<td data-th="Source"><strong>' +
+              esc(s.label) +
+              '</strong><span class="cell-sub">' +
+              idCell(s.source_id, 'Copy source id') +
+              '</span></td>' +
+              '<td data-th="Backend">' +
+              badge(s.backend, 'accent') +
+              '</td>' +
+              '<td data-th="Address">' +
+              idCell(s.arweave_address, 'Copy Arweave address') +
+              '</td>' +
+              '<td data-th="Status">' +
+              badge(s.status) +
+              (s.stale ? ' ' + badge('stale', 'warn') : '') +
+              '</td>' +
+              '<td data-th="Credits" class="num">' +
+              (s.winc_balance == null
+                ? '<span class="muted">not reconciled</span>'
+                : esc(fmtInt(s.winc_balance)) +
+                  ' winc<span class="cell-sub">' +
+                  esc(fmtBytes(s.fundable_bytes)) +
+                  ' fundable</span>') +
+              '</td>' +
+              '<td data-th="Reconciled">' +
+              timeCell(s.last_reconciled_at) +
+              (s.last_error
+                ? '<span class="cell-sub" style="color:var(--danger)">' +
+                  esc(s.last_error) +
+                  '</span>'
+                : '') +
+              '</td>' +
+              '<td class="actions">' +
+              '<button type="button" class="ghost sm" data-act="grants">Grants</button>' +
+              (s.status === 'active'
+                ? '<button type="button" class="danger sm" data-act="drain">Drain</button>'
+                : '') +
+              '</td></tr>',
+          );
+          $('#sto-rows').innerHTML = rows.length
+            ? rows.join('')
+            : emptyRow(
+                7,
+                'No funding sources',
+                'A hash-only gateway has none; register one below to fund uploads.',
+              );
+          $$('#sto-rows tr[data-id]').forEach((tr) => {
+            const id = tr.dataset.id;
+            $$('button[data-act]', tr).forEach((btn) => {
+              if (btn.dataset.act === 'grants') {
+                btn.onclick = () => openGrants(tr, '/storage/sources/' + id + '/grants', 'draw');
+              } else {
+                btn.onclick = () =>
+                  armConfirm(
+                    btn,
+                    async () => {
+                      try {
+                        await api('POST', '/storage/sources/' + id + '/drain', {});
+                        renderStorage();
+                      } catch (e) {
+                        showProblem('sto-flash', e);
+                      }
+                    },
+                    'Drain source?',
+                  );
+              }
+            });
+          });
+          // Top-up source picker follows the active sources.
+          const active = STORAGE_SOURCES.filter((s) => s.status === 'active');
+          $('#topup-form').elements.source.innerHTML = active.length
+            ? active
+                .map(
+                  (s) =>
+                    '<option value="' +
+                    esc(s.source_id) +
+                    '">' +
+                    esc(s.label) +
+                    ' (' +
+                    esc(s.backend) +
+                    ')</option>',
+                )
+                .join('')
+            : '<option value="">no active source</option>';
+        }
+
+        async function renderTopups() {
+          try {
+            const data = await api('GET', '/storage/top-ups?limit=50');
+            const rows = (data.data || []).map(
+              (t) =>
+                '<tr data-id="' +
+                esc(t.topup_id) +
+                '">' +
+                '<td data-th="Created">' +
+                timeCell(t.created_at) +
+                '</td>' +
+                '<td data-th="Amount" class="num" title="' +
+                esc(t.ar_amount_winston) +
+                ' winston">' +
+                esc(winstonToAr(t.ar_amount_winston)) +
+                ' AR</td>' +
+                '<td data-th="Fee" class="num">' +
+                esc(winstonToAr(t.fee_winston)) +
+                ' AR</td>' +
+                '<td data-th="Status">' +
+                badge(t.status) +
+                (t.last_error
+                  ? '<span class="cell-sub" style="color:var(--danger)">' +
+                    esc(t.last_error) +
+                    '</span>'
+                  : '') +
+                '</td>' +
+                '<td data-th="Transfer tx">' +
+                idCell(t.tx_id, 'Copy transaction id') +
+                '</td>' +
+                '<td data-th="Credited" class="num">' +
+                (t.registered_winc == null
+                  ? '<span class="muted">—</span>'
+                  : esc(fmtInt(t.registered_winc)) + ' winc') +
+                '</td>' +
+                '<td class="actions">' +
+                (t.status !== 'registered'
+                  ? '<button type="button" class="ghost sm" data-act="retry">Retry forward</button>'
+                  : '') +
+                '</td></tr>',
+            );
+            $('#topup-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(7, 'No top-ups yet', 'Conversions appear here, newest first.');
+            $$('#topup-rows button[data-act="retry"]').forEach((btn) => {
+              const id = btn.closest('tr').dataset.id;
+              btn.onclick = () =>
+                armConfirm(
+                  btn,
+                  async () => {
+                    try {
+                      await api('POST', '/storage/top-ups/' + id + '/register');
+                      renderTopups();
+                    } catch (e) {
+                      showProblem('topup-flash', e);
+                    }
+                  },
+                  'Retry?',
+                );
+            });
+          } catch (e) {
+            if (!isStorageNotConfigured(e)) showProblem('sto-flash', e);
+          }
+        }
+
+        {
+          const form = $('#topup-form');
+          const preview = $('#topup-preview');
+          form.elements.ar.addEventListener('input', () => {
+            const w = arToWinston(form.elements.ar.value);
+            preview.textContent =
+              w == null
+                ? 'Enter an AR amount (up to 12 decimals).'
+                : '= ' + groupDigits(w) + ' winston. Irreversible once the transfer confirms.';
+          });
+          twoStepSubmit(
+            form,
+            () => {
+              const w = arToWinston(form.elements.ar.value);
+              if (w == null || w === '0') {
+                setFlash('topup-flash', notice('Enter a non-zero AR amount.', 'warn'));
+                return null;
+              }
+              if (!form.elements.source.value) {
+                setFlash('topup-flash', notice('No active funding source to top up.', 'warn'));
+                return null;
+              }
+              setFlash('topup-flash', '');
+              return 'Confirm — convert ' + form.elements.ar.value.trim() + ' AR';
+            },
+            async () => {
+              const body = {
+                ar_amount_winston: arToWinston(form.elements.ar.value),
+                funding_source_id: form.elements.source.value,
+              };
+              try {
+                const out = await api('POST', '/storage/top-up', body);
+                setFlash(
+                  'topup-flash',
+                  notice(
+                    'Top-up recorded: ' +
+                      badge(out.status) +
+                      ' · tx ' +
+                      idCell(out.tx_id, 'Copy transaction id') +
+                      (out.status === 'registered'
+                        ? ' — credits will land once the transfer confirms.'
+                        : ' — retry it forward from the journal if it stalls.'),
+                    'ok',
+                  ),
+                );
+                form.elements.ar.value = '';
+                renderStorage();
+              } catch (e) {
+                setFlash('topup-flash', problemHtml(e));
+              }
+            },
+          );
+        }
+
+        $('#sto-refresh').onclick = renderStorage;
+
+        $('#sto-register-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const body = {
+            label: form.elements.label.value.trim(),
+            backend: form.elements.backend.value,
+            address: form.elements.address.value.trim(),
+          };
+          if (form.elements.scope.value) {
+            body.scope = form.elements.scope.value;
+            if (body.scope === 'account')
+              body.scope_account_id = form.elements.scope_account_id.value;
+          }
+          const root = form.elements.root.value.trim();
+          setFlash('sto-register-flash', '');
+          try {
+            const out = await api('POST', '/storage/sources', body, root || undefined);
+            setFlash(
+              'sto-register-flash',
+              notice(
+                'Source ' +
+                  (out.created ? 'registered' : 're-asserted') +
+                  ': ' +
+                  idCell(out.source_id, 'Copy source id') +
+                  ' · auto-issued grant ' +
+                  idCell(out.grant_id, 'Copy grant id'),
+                'ok',
+              ),
+            );
+            form.elements.root.value = '';
+            renderStorage();
+          } catch (err) {
+            setFlash('sto-register-flash', problemHtml(err));
+          }
+        });
+
+        /* ==================================================================
+         * Webhooks.
+         * ================================================================ */
+        function isWebhooksDisabled(e) {
+          return (
+            e && e.problem && (e.problem.code === 'webhooks-disabled' || e.problem.status === 503)
+          );
+        }
+
+        async function renderWebhooks() {
+          setStatus('wh', 'Loading subscriptions…');
+          sweepFlash('wh-flash');
+          try {
+            const data = await api('GET', '/webhooks');
+            $('#wh-disabled').hidden = true;
+            $('#wh-content').hidden = false;
+            renderEndpoints(data.data || []);
+            renderWebhookHealth();
+            setStatus('wh', '');
+          } catch (e) {
+            setStatus('wh', '');
+            if (isWebhooksDisabled(e)) {
+              $('#wh-content').hidden = true;
+              const n = $('#wh-disabled');
+              n.hidden = false;
+              n.innerHTML = notice(
+                '<strong>Webhook delivery is not enabled on this deployment.</strong> The keyring ' +
+                  'holds no webhook secret-wrap key, so signing secrets cannot be sealed at rest. Add a ' +
+                  '<code>webhook-wrap</code> entry to the keyring to enable the firehose.',
+              );
+            } else {
+              reportProblem('wh-flash', e);
+            }
+          }
+        }
+
+        async function renderWebhookHealth() {
+          try {
+            const data = await api('GET', '/webhooks/health?limit=100');
+            const rows = (data.data || []).map(
+              (h) =>
+                '<tr>' +
+                '<td data-th="Endpoint">' +
+                idCell(h.endpoint_id, 'Copy endpoint id') +
+                '</td>' +
+                '<td data-th="Scope">' +
+                badge(h.scope_kind) +
+                '</td>' +
+                '<td data-th="Status">' +
+                badge(h.status) +
+                '</td>' +
+                '<td data-th="Consecutive failures" class="num">' +
+                (h.consecutive_failures > 0
+                  ? badge(fmtInt(h.consecutive_failures), 'danger')
+                  : '0') +
+                '</td>' +
+                '<td data-th="Dead" class="num">' +
+                (h.dead_deliveries > 0 ? badge(fmtInt(h.dead_deliveries), 'danger') : '0') +
+                '</td>' +
+                '<td data-th="Pending" class="num">' +
+                esc(fmtInt(h.pending_deliveries)) +
+                '</td>' +
+                '<td data-th="Oldest pending">' +
+                timeCell(h.oldest_pending_at) +
+                '</td>' +
+                '<td data-th="Last success">' +
+                timeCell(h.last_success_at) +
+                '</td></tr>',
+            );
+            $('#wh-health-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(8, 'No subscriptions to report on', '');
+          } catch (e) {
+            if (!isWebhooksDisabled(e)) reportProblem('wh-flash', e);
+          }
+        }
+
+        function renderEndpoints(endpoints) {
+          const rows = endpoints.map((w) => {
+            const rotating = !!w.secret_next_fp;
+            return (
+              '<tr data-id="' +
+              esc(w.id) +
+              '">' +
+              '<td data-th="Endpoint"><strong>' +
+              (w.label ? esc(w.label) : '<span class="muted">unlabelled</span>') +
+              '</strong><span class="cell-sub"><code>' +
+              esc(w.url) +
+              '</code></span><span class="cell-sub">' +
+              idCell(w.id, 'Copy endpoint id') +
+              '</span></td>' +
+              '<td data-th="Events">' +
+              chips(w.enabled_events) +
+              '</td>' +
+              '<td data-th="Status">' +
+              badge(w.status) +
+              (w.disabled_reason
+                ? '<span class="cell-sub">' + esc(w.disabled_reason) + '</span>'
+                : '') +
+              '</td>' +
+              '<td data-th="Secret"><code title="active secret sha256 fingerprint">' +
+              esc(shortMid(w.secret_fp)) +
+              '</code>' +
+              (rotating ? ' ' + badge('rotation open', 'warn') : '') +
+              '</td>' +
+              '<td data-th="Failures" class="num">' +
+              esc(fmtInt(w.consecutive_failures)) +
+              ' consec<span class="cell-sub">' +
+              esc(fmtInt(w.dead_deliveries)) +
+              ' dead</span></td>' +
+              '<td class="actions">' +
+              '<button type="button" class="ghost sm" data-act="deliveries">Deliveries</button>' +
+              '<button type="button" class="ghost sm" data-act="edit">Edit</button>' +
+              (w.status === 'active'
+                ? '<button type="button" class="ghost sm" data-act="pause">Pause</button>'
+                : '<button type="button" class="ghost sm" data-act="resume">Resume</button>') +
+              (rotating
+                ? '<button type="button" class="ghost sm" data-act="commit">Commit rotation</button>'
+                : '<button type="button" class="ghost sm" data-act="rotate">Rotate secret</button>') +
+              '<button type="button" class="danger sm" data-act="delete">Delete</button>' +
+              '</td></tr>'
+            );
+          });
+          $('#wh-rows').innerHTML = rows.length
+            ? rows.join('')
+            : emptyRow(
+                6,
+                'No firehose subscriptions',
+                'Register a delivery URL below; events fan out from creation onward (no backfill).',
+              );
+          $$('#wh-rows tr[data-id]').forEach((tr) => {
+            const id = tr.dataset.id;
+            const ep = endpoints.find((x) => x.id === id);
+            $$('button[data-act]', tr).forEach((btn) => {
+              const act = btn.dataset.act;
+              if (act === 'deliveries') btn.onclick = () => openDeliveries(tr, id);
+              else if (act === 'edit') btn.onclick = () => openEndpointEdit(tr, id, ep);
+              else if (act === 'pause' || act === 'resume') {
+                btn.onclick = () =>
+                  armConfirm(
+                    btn,
+                    async () => {
+                      try {
+                        await api('PATCH', '/webhooks/' + id, {
+                          status: act === 'pause' ? 'paused' : 'active',
+                        });
+                        renderWebhooks();
+                      } catch (e) {
+                        reportProblem('wh-flash', e);
+                      }
+                    },
+                    act === 'pause' ? 'Pause?' : 'Resume?',
+                  );
+              } else if (act === 'rotate') {
+                btn.onclick = () =>
+                  armConfirm(
+                    btn,
+                    async () => {
+                      try {
+                        const out = await api('POST', '/webhooks/' + id + '/rotate-secret');
+                        // Re-render first: it clears the flash region, and the
+                        // shown-once successor secret must never be wiped.
+                        await renderWebhooks();
+                        setFlash(
+                          'wh-flash',
+                          secretPanel(
+                            'Successor signing secret',
+                            out.secret_next,
+                            '<span>Deliveries are now dual-signed (old + new). Cut your receivers ' +
+                              'over, then commit the rotation from the endpoint row.</span>',
+                          ),
+                        );
+                      } catch (e) {
+                        reportProblem('wh-flash', e);
+                      }
+                    },
+                    'Rotate secret?',
+                  );
+              } else if (act === 'commit') {
+                btn.onclick = () =>
+                  armConfirm(
+                    btn,
+                    async () => {
+                      try {
+                        await api('POST', '/webhooks/' + id + '/rotate-secret/commit');
+                        await renderWebhooks();
+                        setFlash(
+                          'wh-flash',
+                          notice('Rotation committed — the successor secret is now primary.', 'ok'),
+                        );
+                      } catch (e) {
+                        reportProblem('wh-flash', e);
+                      }
+                    },
+                    'Commit rotation?',
+                  );
+              } else if (act === 'delete') {
+                btn.onclick = () =>
+                  armConfirm(
+                    btn,
+                    async () => {
+                      try {
+                        await api('DELETE', '/webhooks/' + id);
+                        renderWebhooks();
+                      } catch (e) {
+                        reportProblem('wh-flash', e);
+                      }
+                    },
+                    'Delete endpoint?',
+                  );
+              }
+            });
+          });
+        }
+
+        function openEndpointEdit(tr, id, ep) {
+          const dr = toggleDetail(
+            tr,
+            'edit',
+            '<form class="inline-form">' +
+              '<label class="field grow" style="flex:1 1 260px"><span>Delivery URL</span>' +
+              '<input name="url" type="url" required value="' +
+              esc(ep ? ep.url : '') +
+              '"></label>' +
+              '<label class="field"><span>Label (empty clears)</span>' +
+              '<input name="label" value="' +
+              esc(ep && ep.label ? ep.label : '') +
+              '"></label>' +
+              '<label class="field grow" style="flex:1 1 220px"><span>Event filter (comma-separated, empty = all)</span>' +
+              '<input name="events" value="' +
+              esc(ep && ep.enabled_events ? ep.enabled_events.join(', ') : '') +
+              '"></label>' +
+              '<button type="submit" class="sm">Save changes</button>' +
+              '<div class="flash"></div></form>',
+          );
+          if (!dr) return;
+          const form = $('form', dr);
+          form.onsubmit = async (e) => {
+            e.preventDefault();
+            const label = form.elements.label.value.trim();
+            const events = form.elements.events.value
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            try {
+              await api('PATCH', '/webhooks/' + id, {
+                url: form.elements.url.value.trim(),
+                label: label || null,
+                enabled_events: events,
+              });
+              renderWebhooks();
+            } catch (err) {
+              $('.flash', dr).innerHTML = problemHtml(err);
+            }
+          };
+        }
+
+        async function openDeliveries(tr, id) {
+          const dr = toggleDetail(tr, 'deliveries', '<p class="muted">Loading deliveries…</p>');
+          if (!dr) return;
+          try {
+            const data = await api('GET', '/webhooks/' + id + '/deliveries?limit=50');
+            const items = data.data || [];
+            if (!items.length) {
+              dr.firstElementChild.innerHTML =
+                '<div class="empty-state"><b>No deliveries yet</b>Events fan out from subscription creation onward.</div>';
+              return;
+            }
+            dr.firstElementChild.innerHTML =
+              '<div class="scroll-x"><table><thead><tr>' +
+              '<th>Event</th><th>Subject</th><th>State</th><th class="num">Attempts</th>' +
+              '<th>Next attempt</th><th class="num">Last HTTP</th><th>Created</th><th></th>' +
+              '</tr></thead><tbody>' +
+              items
+                .map(
+                  (d) =>
+                    '<tr data-id="' +
+                    esc(d.id) +
+                    '"><td><code>' +
+                    esc(d.event_type) +
+                    '</code></td>' +
+                    '<td>' +
+                    esc(d.subject_kind) +
+                    ' ' +
+                    idCell(d.subject_id, 'Copy subject id') +
+                    '<span class="cell-sub">seq ' +
+                    esc(fmtInt(d.subject_seq)) +
+                    '</span></td>' +
+                    '<td>' +
+                    badge(d.state) +
+                    (d.last_error
+                      ? '<span class="cell-sub" style="color:var(--danger)" title="' +
+                        esc(d.last_error) +
+                        '">' +
+                        esc(
+                          d.last_error.length > 60 ? d.last_error.slice(0, 60) + '…' : d.last_error,
+                        ) +
+                        '</span>'
+                      : '') +
+                    '</td>' +
+                    '<td class="num">' +
+                    esc(fmtInt(d.attempts)) +
+                    ' / ' +
+                    esc(fmtInt(d.max_attempts)) +
+                    '</td>' +
+                    '<td>' +
+                    (d.state === 'pending'
+                      ? timeCell(d.next_attempt_at)
+                      : timeCell(d.delivered_at)) +
+                    '</td>' +
+                    '<td class="num">' +
+                    (d.last_status == null ? '—' : esc(String(d.last_status))) +
+                    '</td>' +
+                    '<td>' +
+                    timeCell(d.created_at) +
+                    '</td>' +
+                    '<td>' +
+                    (d.state === 'failed'
+                      ? '<button type="button" class="ghost sm" data-redrive>Retry</button>'
+                      : '') +
+                    '</td></tr>',
+                )
+                .join('') +
+              '</tbody></table></div><div class="flash"></div>';
+            $$('button[data-redrive]', dr).forEach((btn) => {
+              const did = btn.closest('tr').dataset.id;
+              btn.onclick = () =>
+                armConfirm(
+                  btn,
+                  async () => {
+                    try {
+                      await api('POST', '/webhooks/' + id + '/deliveries/' + did + '/retry');
+                      openDeliveries(tr, id); // closes
+                      openDeliveries(tr, id); // reopens fresh
+                    } catch (e) {
+                      $('.flash', dr).innerHTML = problemHtml(e);
+                    }
+                  },
+                  'Redrive?',
+                );
+            });
+          } catch (e) {
+            dr.firstElementChild.innerHTML = problemHtml(e);
+          }
+        }
+
+        $('#wh-refresh').onclick = renderWebhooks;
+
+        $('#wh-register-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const body = { url: form.elements.url.value.trim() };
+          const label = form.elements.label.value.trim();
+          if (label) body.label = label;
+          const events = form.elements.events.value
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          if (events.length) body.enabled_events = events;
+          // Sweep stale problems but never a prior secret panel — a signing
+          // secret is shown once and a second registration must not wipe it.
+          $$('#wh-register-flash .problem').forEach((n) => n.remove());
+          try {
+            const out = await api('POST', '/webhooks', body);
+            appendFlash(
+              'wh-register-flash',
+              secretPanel(
+                'Webhook signing secret',
+                out.secret,
+                '<span>endpoint ' + idCell(out.id, 'Copy endpoint id') + '</span>',
+              ),
+            );
+            form.reset();
+            renderWebhooks();
+          } catch (err) {
+            appendFlash('wh-register-flash', problemHtml(err));
+          }
+        });
+
+        /* ==================================================================
+         * Audit + chain provider diagnostics.
+         * ================================================================ */
+        async function renderAudit() {
+          setStatus('aud', 'Loading audit log…');
+          setFlash('aud-flash', '');
+          const form = $('#aud-filter-form');
+          const params = new URLSearchParams();
+          params.set('limit', form.elements.limit.value);
+          for (const k of ['actor_kind', 'action', 'target_type', 'target_id']) {
+            const v = form.elements[k].value.trim();
+            if (v) params.set(k, v);
+          }
+          try {
+            const data = await api('GET', '/audit?' + params.toString());
+            const rows = (data.data || []).map((r, i) => {
+              const hasState = r.prev_state != null || r.new_state != null;
+              return (
+                '<tr data-i="' +
+                i +
+                '">' +
+                '<td data-th="When">' +
+                timeCell(r.occurred_at) +
+                '</td>' +
+                '<td data-th="Actor">' +
+                badge(r.actor_kind) +
+                (r.actor_id
+                  ? '<span class="cell-sub">' + idCell(r.actor_id, 'Copy actor id') + '</span>'
+                  : '') +
+                '</td>' +
+                '<td data-th="Action"><code>' +
+                esc(r.action) +
+                '</code></td>' +
+                '<td data-th="Target">' +
+                esc(r.target_type) +
+                ' ' +
+                idCell(r.target_id, 'Copy target id') +
+                '</td>' +
+                '<td class="actions">' +
+                (hasState
+                  ? '<button type="button" class="ghost sm" data-act="state">State</button>'
+                  : '') +
+                '</td></tr>'
+              );
+            });
+            $('#aud-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(5, 'No audit records match', 'Adjust the filters and re-apply.');
+            const records = data.data || [];
+            $$('#aud-rows tr[data-i]').forEach((tr) => {
+              const r = records[Number(tr.dataset.i)];
+              const btn = $('button[data-act="state"]', tr);
+              if (!btn) return;
+              btn.onclick = () => {
+                toggleDetail(
+                  tr,
+                  'state',
+                  '<div class="json-pair">' +
+                    '<div><h4>Previous state</h4><pre class="json">' +
+                    esc(JSON.stringify(r.prev_state, null, 2)) +
+                    '</pre></div>' +
+                    '<div><h4>New state</h4><pre class="json">' +
+                    esc(JSON.stringify(r.new_state, null, 2)) +
+                    '</pre></div></div>' +
+                    (r.request_id
+                      ? '<p class="form-note" style="margin-top:8px">request ' +
+                        esc(r.request_id) +
+                        '</p>'
+                      : ''),
+                );
+              };
+            });
+            setStatus('aud', '');
+          } catch (e) {
+            setStatus('aud', '');
+            showProblem('aud-flash', e);
+          }
+          renderProviderUsage();
+        }
+
+        async function renderProviderUsage() {
+          const days = $('#prov-form').elements.days.value;
+          try {
+            const data = await api('GET', '/chain/provider-usage?days=' + days);
+            const rows = (data.data || []).map(
+              (r) =>
+                '<tr>' +
+                '<td data-th="Day"><code>' +
+                esc(r.day) +
+                '</code></td>' +
+                '<td data-th="Provider">' +
+                esc(r.provider) +
+                '</td>' +
+                '<td data-th="Network">' +
+                badge(r.network) +
+                '</td>' +
+                '<td data-th="Requests" class="num">' +
+                esc(fmtInt(r.request_count)) +
+                '</td>' +
+                '<td data-th="Denied" class="num">' +
+                (r.denied_count > 0 ? badge(fmtInt(r.denied_count), 'warn') : '0') +
+                '</td></tr>',
+            );
+            $('#prov-rows').innerHTML = rows.length
+              ? rows.join('')
+              : emptyRow(
+                  5,
+                  'No provider calls recorded',
+                  'Counters appear as the gate records egress.',
+                );
+          } catch (e) {
+            $('#prov-rows').innerHTML = '<tr><td colspan="5">' + problemHtml(e) + '</td></tr>';
+          }
+        }
+
+        $('#aud-filter-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          renderAudit();
+        });
+        $('#prov-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          renderProviderUsage();
+        });
+
+        /* ------------------------------------------------------------------
+         * Boot: restore the session token, honor a #tab deep link, connect.
+         * ---------------------------------------------------------------- */
+        scopeCheckboxes('key-scope-boxes');
+        scopeCheckboxes('tok-scope-boxes');
+        const hashTab = location.hash.replace('#', '');
+        switchTab(TAB_LOADERS[hashTab] ? hashTab : currentTab);
+        window.addEventListener('hashchange', () => {
+          const t = location.hash.replace('#', '');
+          if (TAB_LOADERS[t] && t !== currentTab) switchTab(t);
+        });
+        tokenInput.value = sessionToken();
+        if (tokenInput.value) connect();
+      })();
+    </script>
+  </body>
+</html>

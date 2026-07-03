@@ -1,0 +1,22 @@
+{
+  "name": "change_below_min_ada_fold",
+  "mode": "standard",
+  "protocol": {
+    "min_fee_a": 44,
+    "min_fee_b": 155381,
+    "coins_per_utxo_byte": 4310,
+    "max_tx_size": 16384
+  },
+  "record_len": 32,
+  "utxos": [
+    {
+      "tx_hash": "4f2f70483b4efbac5ef9c984fcc664401125a1f6b7e8fe35171c79e27d43abaf",
+      "index": 0,
+      "lovelace": 850000
+    }
+  ],
+  "validity": null,
+  "expect": "ok",
+  "change_address": "addr_test1vpa8ukd77k05gc3etxeyzylxxmyhzg0hvne9qplxvsyl44q6pl7v4",
+  "network_id": 0
+}

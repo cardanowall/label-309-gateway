@@ -1,0 +1,79 @@
+[package]
+name = "conformance"
+version = "0.1.0"
+description = "Conformance harness: drives the published Label 309 SDK/CLI artifacts against a running gateway to prove the byte-stable wire contract."
+# A test-only harness, never published. It pins the PUBLISHED artifacts as
+# registry dependencies (not path) so it exercises exactly what a third party
+# installs, not the in-repo source.
+publish = false
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+# The PUBLISHED Rust SDK, pinned to the exact released version that is the wire
+# contract oracle. A NORMAL registry dependency (not a path dep): the harness
+# must drive the artifact a third party would `cargo add`, so a regression in
+# the gateway's wire shape surfaces as a deserialize failure in the real client.
+cardanowall = "=0.8.0"
+# The in-repo engine, so the harness can BOOT the gateway under test (build its
+# router over a fresh database, wire the pricing/storage seams a deployment
+# supplies) and seed an operator/account/api-key directly. This is the system
+# under test; the published `cardanowall` above is the client that drives it.
+# `pg-tests` unlocks the engine's in-tree test constructors (the webhook-wrap
+# keyring the booted gateway seals delivery secrets under, the direct subject-event
+# seam); it is additive — it gates no production code path, only the seams the
+# harness drives the webhook/control planes through.
+gateway-core = { path = "../gateway-core", features = ["pg-tests"] }
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process", "net", "io-util", "fs"] }
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+data-encoding.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+# The resumable-upload scenarios send each chunk's RFC 9530 `Digest: sha-256=<base64>`
+# header, so the chunk digest is base64-encoded the same way the SDK/browser client
+# would. The same encoder the gateway decodes with, kept in lockstep.
+base64.workspace = true
+# The HTTP server the boot module serves the engine router with, and the address
+# helpers the harness binds an ephemeral port through.
+axum.workspace = true
+# An async HTTP client the suite drives the control plane, the account-scoped
+# webhook routes, and the uploads route with. The published `cardanowall` SDK
+# covers only the data-plane publish/quote/records surface, so the webhook and
+# control routes (which a third party drives over plain HTTP) are exercised through
+# a direct client rather than the SDK.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+# The HMAC the conformance receiver recomputes to verify a delivery signature
+# (the W3/W12 strict-verify contract). Pinned to the same 0.12 line the gateway
+# signer uses so both compute the identical MAC.
+hmac = { workspace = true }
+# The storage-upload conformance leg wires the engine's content-upload stack over
+# real HTTP: an age-encrypted keyring holding a fixture Arweave key the route signs
+# a data item through, and the ANS-104 signer that derives the funding address. The
+# backend itself is a harness stub (no live provider), so the suite proves the
+# charge-at-upload / dedup / poll-authoritative contract without a funded Turbo
+# account (the live leg is the gate).
+age = { workspace = true }
+ans104 = { path = "../ans104" }
+tempfile = { workspace = true }
+# The upload-signing keyring is unlocked from an age envelope through the engine's
+# `unlock`, whose passphrase argument is a `Zeroizing<String>`; pulled in to build
+# that argument.
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process", "net", "io-util", "fs"] }
+
+[features]
+# The conformance suite talks to a running gateway and a real Postgres, so it is
+# gated behind a feature the default `cargo test` never enables. The CI gate runs
+# `cargo test -p conformance --features live` after preparing a database.
+default = []
+live = []

@@ -1,0 +1,2282 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gateway control plane",
+    "version": "1.5.0",
+    "description": "The operator-only administrative API. Provisions accounts, mints credentials, rotates and revokes them, registers wallets and storage funding sources, adjusts balances, reads the live storage funding position, converts AR into prepaid storage credits, and serves the audit log. Authenticated with an operator token or the operator root credential; a small account-level subset accepts an account-scoped token acting on itself. Separate from the data-plane contract and independently versioned."
+  },
+  "servers": [
+    {
+      "url": "/control/v1",
+      "description": "Operator-configured deployment origin; the version segment is fixed."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An operator token, the operator root credential, or (for account-level routes) an account-scoped token."
+      }
+    },
+    "schemas": {
+      "ListEnvelope": {
+        "type": "object",
+        "required": ["object", "data", "count"],
+        "properties": {
+          "object": { "type": "string", "const": "list" },
+          "data": { "type": "array", "items": {} },
+          "count": { "type": "integer" }
+        }
+      },
+      "ClampedDebitResult": {
+        "type": "object",
+        "required": ["account_id", "debited_usd_micros", "applied"],
+        "properties": {
+          "account_id": { "type": "string", "format": "uuid" },
+          "debited_usd_micros": {
+            "type": "integer",
+            "description": "The micro-USD amount actually removed from the balance (0 <= debited <= requested). The caller carries requested - debited as arrears."
+          },
+          "applied": {
+            "type": "boolean",
+            "description": "True when this call computed and recorded the result; false on an idempotent replay returning the stored amount."
+          }
+        }
+      },
+      "OperatorToken": {
+        "type": "object",
+        "required": ["token", "token_id", "expires_at"],
+        "properties": {
+          "token": { "type": "string", "description": "The minted secret, shown once." },
+          "token_id": { "type": "string", "format": "uuid" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RotatedRootCredential": {
+        "type": "object",
+        "required": ["credential_id", "secret", "revoked_credential_id", "operator_id"],
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The successor root credential."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The successor's plaintext secret, shown once; it is never stored and cannot be recovered."
+          },
+          "revoked_credential_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The old root this rotation revoked."
+          },
+          "operator_id": { "type": "string", "format": "uuid" }
+        }
+      },
+      "ControlCredential": {
+        "type": "object",
+        "required": ["credential_id", "kind", "created_at"],
+        "properties": {
+          "credential_id": { "type": "string", "format": "uuid" },
+          "kind": { "type": "string", "enum": ["operator_root"] },
+          "label": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the credential was revoked, or null while live."
+          }
+        }
+      },
+      "AccessTokenSummary": {
+        "type": "object",
+        "required": ["token_id", "scopes", "expires_at", "created_at"],
+        "properties": {
+          "token_id": { "type": "string", "format": "uuid" },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "The account the token is scoped to, or null for an operator token."
+          },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "minted_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "The row id of the credential that minted the token — the lineage a credential revocation cascades through."
+          },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the token was revoked, or null while un-revoked."
+          }
+        }
+      },
+      "AccountToken": {
+        "type": "object",
+        "required": ["token", "token_id", "account_id", "scopes", "expires_at"],
+        "properties": {
+          "token": { "type": "string", "description": "The minted secret, shown once." },
+          "token_id": { "type": "string", "format": "uuid" },
+          "account_id": { "type": "string", "format": "uuid" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "rate_limit_per_min": {
+            "type": "integer",
+            "nullable": true,
+            "description": "The custom per-minute request budget the token carries, or null when it uses the fixed fallback."
+          },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": ["account_id", "status"],
+        "properties": {
+          "account_id": { "type": "string", "format": "uuid" },
+          "operator_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "balance_usd_micros": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AccountUsage": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "status",
+          "balance_usd_micros",
+          "ledger_entry_count",
+          "quote_count",
+          "publish_count"
+        ],
+        "properties": {
+          "account_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "balance_usd_micros": { "type": "integer" },
+          "ledger_entry_count": { "type": "integer" },
+          "quote_count": { "type": "integer" },
+          "publish_count": { "type": "integer" }
+        }
+      },
+      "CreatedKey": {
+        "type": "object",
+        "required": ["key_id", "secret", "prefix", "scopes", "rate_limit_per_min", "created_at"],
+        "properties": {
+          "key_id": { "type": "string", "format": "uuid" },
+          "secret": { "type": "string", "description": "The api-key secret, shown once." },
+          "prefix": { "type": "string" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "rate_limit_per_min": {
+            "type": ["integer", "null"],
+            "description": "The custom per-minute request budget the key carries, or null when it meters against the data-plane default budget."
+          },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "operator_id",
+          "label",
+          "address",
+          "network",
+          "status",
+          "available_utxos",
+          "canonical_utxos"
+        ],
+        "properties": {
+          "wallet_id": { "type": "string", "format": "uuid" },
+          "operator_id": { "type": "string", "format": "uuid" },
+          "label": { "type": "string" },
+          "address": { "type": "string" },
+          "network": { "type": "string", "enum": ["mainnet", "preprod", "preview"] },
+          "status": { "type": "string", "enum": ["active", "draining", "retired"] },
+          "available_utxos": { "type": "integer" },
+          "canonical_utxos": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "FundingSource": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "operator_id",
+          "label",
+          "backend",
+          "arweave_address",
+          "status",
+          "stale"
+        ],
+        "properties": {
+          "source_id": { "type": "string", "format": "uuid" },
+          "operator_id": { "type": "string", "format": "uuid" },
+          "label": { "type": "string" },
+          "backend": { "type": "string", "enum": ["turbo", "direct-arweave", "arlocal"] },
+          "arweave_address": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "draining", "retired"] },
+          "winc_balance": {
+            "type": ["string", "null"],
+            "description": "The cached believed winc balance, null until the first reconcile stamps one."
+          },
+          "fundable_bytes": { "type": ["integer", "null"] },
+          "last_reconciled_at": { "type": ["string", "null"], "format": "date-time" },
+          "last_error": { "type": ["string", "null"] },
+          "stale": {
+            "type": "boolean",
+            "description": "True when the cached balance is unreconciled or a refresh failed."
+          }
+        }
+      },
+      "FundingStatus": {
+        "type": "object",
+        "required": [
+          "source_count",
+          "total_winc_balance",
+          "total_fundable_bytes",
+          "stale_source_count"
+        ],
+        "properties": {
+          "source_count": { "type": "integer" },
+          "total_winc_balance": {
+            "type": "string",
+            "description": "The summed believed winc across the operator's sources, as a decimal string."
+          },
+          "total_fundable_bytes": { "type": "integer" },
+          "stale_source_count": { "type": "integer" }
+        }
+      },
+      "FxSnapshot": {
+        "type": "object",
+        "description": "The live FX snapshot the gateway prices publishes from, plus its freshness. When no snapshot has been written yet (cold start), only available (false), stale (true), freshness_ceiling_seconds, and operator_default_margin_pct are present.",
+        "required": [
+          "available",
+          "stale",
+          "freshness_ceiling_seconds",
+          "operator_default_margin_pct"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether a snapshot exists. False on a cold start before the refresh loop has written its first row, in which case the rate fields are absent and stale is true."
+          },
+          "ada_usd_micros": {
+            "type": "integer",
+            "description": "The ADA->USD price, in micro-USD (USD x 1e6) per ADA. Present only when available is true."
+          },
+          "ar_usd_per_byte_femto": {
+            "type": "integer",
+            "description": "The Arweave storage price, in femto-USD (USD x 1e15) per byte. Present only when available is true."
+          },
+          "ar_usd_per_mib": {
+            "type": "string",
+            "description": "The Arweave storage price per mebibyte, derived from ar_usd_per_byte_femto, as a decimal USD string. Present only when available is true."
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the refresh loop wrote the snapshot. Present only when available is true."
+          },
+          "age_seconds": {
+            "type": "integer",
+            "description": "How old the snapshot is, in seconds, clamped at zero. Present only when available is true."
+          },
+          "source": {
+            "type": "string",
+            "description": "The oracle source that produced the snapshot. Present only when available is true."
+          },
+          "freshness_ceiling_seconds": {
+            "type": "integer",
+            "description": "The maximum age past which a snapshot is stale and the quote path refuses to price. The same ceiling the live pricing seam enforces."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Whether the snapshot is older than freshness_ceiling_seconds (or absent). A stale snapshot no longer prices a quote."
+          },
+          "operator_default_margin_pct": {
+            "type": "string",
+            "description": "The operator-default markup fraction applied over the cost of goods for an account with no per-account override, as a decimal string."
+          }
+        }
+      },
+      "StorageTopUp": {
+        "type": "object",
+        "description": "One AR -> provider-credit conversion: an on-chain AR transfer to the storage provider's deposit wallet plus its registration with the payment service. Irreversible once the transfer confirms.",
+        "required": [
+          "topup_id",
+          "funding_source_id",
+          "ar_amount_winston",
+          "fee_winston",
+          "target_address",
+          "tx_id",
+          "idempotency_key",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "topup_id": { "type": "string", "format": "uuid" },
+          "funding_source_id": { "type": "string", "format": "uuid" },
+          "ar_amount_winston": {
+            "type": "string",
+            "description": "The transferred amount, in winston, as a decimal string."
+          },
+          "fee_winston": {
+            "type": "string",
+            "description": "The node-quoted transfer fee, in winston."
+          },
+          "target_address": {
+            "type": "string",
+            "description": "The provider deposit wallet the transfer pays."
+          },
+          "tx_id": {
+            "type": "string",
+            "description": "The Arweave transfer transaction id, fixed at signing."
+          },
+          "idempotency_key": {
+            "type": ["string", "null"],
+            "description": "The create idempotency key naming this conversion (unique per operator). Null only on conversions journalled before the key existed."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["signed", "submitted", "submit_failed", "registered", "credited"],
+            "description": "How far the conversion provably progressed. signed/submitted/submit_failed retry FORWARD via the register route; registered means the payment service accepted the transfer and credits it at confirmation depth (the register route keeps polling it forward); credited is terminal — the provider credit landed and was journalled into the believed balance."
+          },
+          "last_error": {
+            "type": ["string", "null"],
+            "description": "The most recent broadcast/registration failure, cleared on a later success."
+          },
+          "registered_winc": {
+            "type": ["string", "null"],
+            "description": "The winc the payment service reported it will credit, when known."
+          },
+          "credited_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the payment service reported the transfer credited and the winc was journalled into the believed balance. Null until the credit lands."
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "OperatorStorageBalance": {
+        "type": "object",
+        "description": "The operator's live storage funding position: per funding wallet, the on-chain AR balance and (on a payment-service backend) the live prepaid credit balance, plus cached reconcile diagnostics and recent top-ups.",
+        "required": [
+          "storage_configured",
+          "backend",
+          "fetched_at",
+          "wallets",
+          "top_up",
+          "recent_top_ups"
+        ],
+        "properties": {
+          "storage_configured": { "type": "boolean" },
+          "backend": {
+            "type": ["string", "null"],
+            "description": "The configured storage backend's persisted identifier, or null when no storage is configured."
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the live balances in this response were read."
+          },
+          "wallets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["arweave_address", "key_held", "turbo"],
+              "properties": {
+                "arweave_address": { "type": "string" },
+                "key_label": {
+                  "type": ["string", "null"],
+                  "description": "The keyring entry's operator label, when the instance holds the signing key."
+                },
+                "key_held": { "type": "boolean" },
+                "source": {
+                  "type": ["object", "null"],
+                  "description": "The registered funding-source row with its cached reconcile diagnostics, or null for a held key no source claims yet."
+                },
+                "ar_balance_winston": {
+                  "type": ["string", "null"],
+                  "description": "The live on-chain AR balance, in winston; null when the node read failed."
+                },
+                "ar_balance_error": { "type": ["string", "null"] },
+                "turbo": {
+                  "type": "object",
+                  "description": "The live prepaid-credit read: { available: true, winc, fundable_bytes } on a payment-service backend, or { available: false, reason, detail? } with reason turbo-not-active or provider-unavailable."
+                }
+              }
+            }
+          },
+          "top_up": {
+            "type": "object",
+            "description": "Whether a top-up can be issued right now: { enabled: true } or { enabled: false, reason } with reason storage-not-configured, turbo-not-active, or no-funding-source."
+          },
+          "recent_top_ups": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/StorageTopUp" }
+          }
+        }
+      },
+      "OperatorWalletBalance": {
+        "type": "object",
+        "description": "The operator's live on-chain ADA balance per Cardano signing wallet, as a pure overlay keyed by wallet_id: the live total lovelace at each wallet's address read from Koios. A balance overlay, not a roster — the identity fields (label, address, status, UTxO counts) stay owned by GET /wallets and are joined on by wallet_id. A LIVE chain read backing an explicit operator refresh, not request-path traffic.",
+        "required": ["chain_configured", "fetched_at", "balances"],
+        "properties": {
+          "chain_configured": {
+            "type": "boolean",
+            "description": "Whether the chain seam is wired; false reports every balance unavailable rather than inventing a figure."
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the live balances in this response were read."
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["wallet_id"],
+              "properties": {
+                "wallet_id": { "type": "string", "format": "uuid" },
+                "balance_lovelace": {
+                  "type": ["string", "null"],
+                  "description": "The live total lovelace across every UTxO at the wallet's address, as a decimal string; null when the chain read failed."
+                },
+                "balance_error": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      },
+      "AuditRecord": {
+        "type": "object",
+        "required": ["id", "actor_kind", "action", "target_type", "target_id", "occurred_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "actor_kind": { "type": "string", "enum": ["operator", "account", "system"] },
+          "actor_id": { "type": ["string", "null"], "format": "uuid" },
+          "action": { "type": "string" },
+          "target_type": { "type": "string" },
+          "target_id": { "type": "string" },
+          "prev_state": {},
+          "new_state": {},
+          "request_id": { "type": ["string", "null"], "format": "uuid" },
+          "occurred_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["type", "title", "status", "code"],
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "detail": { "type": "string" },
+          "code": { "type": "string" },
+          "trace_id": { "type": "string" }
+        }
+      },
+      "WebhookHealth": {
+        "type": "object",
+        "description": "One endpoint's webhook health, covering the operator's own firehose subscriptions and the account-scoped subscriptions under accounts the operator owns.",
+        "required": [
+          "endpoint_id",
+          "scope_kind",
+          "status",
+          "consecutive_failures",
+          "dead_deliveries",
+          "pending_deliveries"
+        ],
+        "properties": {
+          "endpoint_id": { "type": "string", "format": "uuid" },
+          "scope_kind": { "type": "string", "enum": ["account", "operator"] },
+          "status": { "type": "string", "enum": ["active", "paused", "disabled"] },
+          "consecutive_failures": {
+            "type": "integer",
+            "description": "The auto-disable accumulator: consecutive fully-exhausted deliveries."
+          },
+          "last_success_at": { "type": ["string", "null"], "format": "date-time" },
+          "dead_deliveries": {
+            "type": "integer",
+            "description": "Count of failed (dead-letter) deliveries."
+          },
+          "pending_deliveries": {
+            "type": "integer",
+            "description": "Count of pending (in-flight) deliveries."
+          },
+          "oldest_pending_due": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the soonest pending delivery becomes due."
+          },
+          "oldest_pending_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the oldest pending delivery was fanned out (an old value flags a stuck backlog)."
+          }
+        }
+      },
+      "WebhookCreateRequest": {
+        "type": "object",
+        "description": "The operator firehose registration body. The URL is validated through the SSRF guard; enabled_events filters on published wire event names (empty/omitted = all).",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "description": "The HTTPS delivery target." },
+          "enabled_events": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Wire event names to deliver; empty or omitted = all."
+          },
+          "label": { "type": "string", "description": "An optional human label." }
+        }
+      },
+      "WebhookPatchRequest": {
+        "type": "object",
+        "description": "Partial update of a firehose subscription. Every field is optional; an absent field is left untouched. A null label clears it.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused"],
+            "description": "Move between active and paused (re-activating resets the auto-disable counter). disabled is server-only."
+          },
+          "enabled_events": { "type": "array", "items": { "type": "string" } },
+          "url": { "type": "string" },
+          "label": { "type": ["string", "null"] }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "description": "An operator firehose subscription. Carries the secret fingerprint, never the secret; the rotation-window fingerprint appears only while a rotation is open.",
+        "required": [
+          "id",
+          "url",
+          "enabled_events",
+          "status",
+          "secret_fp",
+          "consecutive_failures",
+          "dead_deliveries",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "url": { "type": "string" },
+          "enabled_events": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": "string", "enum": ["active", "paused", "disabled"] },
+          "disabled_reason": { "type": ["string", "null"] },
+          "secret_fp": {
+            "type": "string",
+            "description": "Hex sha256 fingerprint of the active signing secret."
+          },
+          "secret_next_fp": {
+            "type": ["string", "null"],
+            "description": "The successor secret's fingerprint, present only during a rotation window."
+          },
+          "consecutive_failures": { "type": "integer" },
+          "dead_deliveries": { "type": "integer" },
+          "last_success_at": { "type": ["string", "null"], "format": "date-time" },
+          "label": { "type": ["string", "null"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WebhookCreatedEndpoint": {
+        "type": "object",
+        "description": "The create response: the row metadata plus the signing secret, returned exactly once and never retrievable again (later reads carry only the fingerprint).",
+        "required": ["id", "url", "enabled_events", "status", "created_at", "secret"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "url": { "type": "string" },
+          "enabled_events": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": "string", "enum": ["active", "paused", "disabled"] },
+          "label": { "type": ["string", "null"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "secret": {
+            "type": "string",
+            "description": "The signing secret, returned exactly once."
+          }
+        }
+      },
+      "WebhookRotatedSecret": {
+        "type": "object",
+        "description": "The rotate-secret response: the successor signing secret shown exactly once plus both active fingerprints (the dual-sign window is now open).",
+        "required": ["id", "secret_fp", "secret_next_fp", "secret_next"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "secret_fp": { "type": "string" },
+          "secret_next_fp": { "type": "string" },
+          "secret_next": {
+            "type": "string",
+            "description": "The successor signing secret, returned exactly once."
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "description": "One delivery row in the firehose dead-letter view. The frozen body is not returned (it is what the receiver already received).",
+        "required": [
+          "id",
+          "webhook_id",
+          "subject_kind",
+          "subject_id",
+          "subject_seq",
+          "event_type",
+          "state",
+          "attempts",
+          "max_attempts",
+          "next_attempt_at",
+          "created_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "webhook_id": {
+            "type": "string",
+            "description": "The per-delivery Webhook-Id the receiver dedupes on."
+          },
+          "subject_kind": { "type": "string" },
+          "subject_id": { "type": "string" },
+          "subject_seq": { "type": "integer" },
+          "event_type": { "type": "string" },
+          "state": { "type": "string", "enum": ["pending", "delivered", "failed"] },
+          "attempts": { "type": "integer" },
+          "max_attempts": { "type": "integer" },
+          "next_attempt_at": { "type": "string", "format": "date-time" },
+          "delivered_at": { "type": ["string", "null"], "format": "date-time" },
+          "last_status": { "type": ["integer", "null"] },
+          "last_error": { "type": ["string", "null"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/openapi.json": {
+      "get": {
+        "operationId": "meta.openapi",
+        "summary": "Machine-readable OpenAPI 3.1 document for the control plane.",
+        "description": "Static JSON document describing every /control/v1/* operation. Served verbatim from the embedded asset; separate from the data-plane document at /api/v1/openapi.json and independently versioned. Public — no auth gate.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — OpenAPI 3.1 document returned.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "meta.docs",
+        "summary": "Interactive Scalar API Reference for the control-plane document.",
+        "description": "Static HTML page that renders /control/v1/openapi.json with the Scalar API Reference. The renderer bundle is served by this gateway at /control/v1/docs/scalar.js (never a third-party CDN), so the page works fully offline. Public — the same posture as openapi.json; the page embeds no secret, and an operator still needs a token to call any endpoint.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — Scalar API Reference HTML rendered.",
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/scalar.js": {
+      "get": {
+        "operationId": "meta.docsScalarJs",
+        "summary": "Vendored Scalar API Reference renderer bundle.",
+        "description": "The JavaScript bundle the /control/v1/docs page loads, served from this gateway so the docs UI never reaches a third-party CDN. Public — no auth gate. Long-lived caching; the bytes change only when the gateway binary is rebuilt against a new bundle.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — renderer bundle returned.",
+            "content": {
+              "text/javascript": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operator/token": {
+      "post": {
+        "operationId": "operator.mintToken",
+        "summary": "Mint a short-lived operator token.",
+        "description": "Authenticated by the operator root credential only.",
+        "responses": {
+          "201": {
+            "description": "The minted operator token.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OperatorToken" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "The presented credential is not the operator root." }
+        }
+      }
+    },
+    "/operator/root/rotate": {
+      "post": {
+        "operationId": "operator.rotateRoot",
+        "summary": "Rotate the presented root credential.",
+        "description": "Authenticated by the operator root credential only; the rotation replaces the exact credential that authenticated the call. One transaction revokes the presented root and mints its successor, so the operator is never left rootless and a concurrently revoked root cannot mint a replacement. Revocation cascades through the mint lineage: every operator token minted from the old root, and every account token minted beneath those, stops authenticating immediately. Data-plane api keys are untouched. The successor's secret is returned exactly once.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "A label for the successor. Omitted, the old root's label carries over."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The successor root credential, its secret shown once.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RotatedRootCredential" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credential, or the presented root was revoked concurrently."
+          },
+          "403": { "description": "The presented credential is not the operator root." }
+        }
+      }
+    },
+    "/credentials": {
+      "get": {
+        "operationId": "credentials.list",
+        "summary": "List the operator's control credentials.",
+        "description": "Ids and lifecycle only; a stored secret is unrecoverable by design. Revoked credentials stay listed, so the roster doubles as rotation history.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The credential roster.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/credentials/{credential_id}/revoke": {
+      "post": {
+        "operationId": "credentials.revoke",
+        "summary": "Revoke a control credential.",
+        "description": "Authenticated by the operator root credential only. Revocation cascades through the mint lineage to every token minted under the credential. Revoking the operator's only live root is refused (rotate instead, or provision an additional root first). Idempotent.",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revoke outcome; revoked is false on an idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["credential_id", "revoked"],
+                  "properties": {
+                    "credential_id": { "type": "string", "format": "uuid" },
+                    "revoked": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "The presented credential is not the operator root." },
+          "404": { "description": "No such credential under this operator." },
+          "409": { "description": "The target is the operator's only live root credential." }
+        }
+      }
+    },
+    "/tokens": {
+      "get": {
+        "operationId": "tokens.list",
+        "summary": "List the operator's access tokens.",
+        "description": "Ids and lifecycle only; a token secret is unrecoverable by design. Expired and revoked tokens stay listed within the page as recent history.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The token roster.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/tokens/{token_id}/revoke": {
+      "post": {
+        "operationId": "tokens.revoke",
+        "summary": "Revoke one access token.",
+        "description": "The targeted kill switch for a single leaked token, without a full root rotation. Revoking a token also invalidates any token minted under it (the mint lineage). Idempotent.",
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revoke outcome; revoked is false on an idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["token_id", "revoked"],
+                  "properties": {
+                    "token_id": { "type": "string", "format": "uuid" },
+                    "revoked": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No such token under this operator." }
+        }
+      }
+    },
+    "/accounts": {
+      "post": {
+        "operationId": "accounts.create",
+        "summary": "Create an account under the operator.",
+        "responses": {
+          "201": {
+            "description": "The created account.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Account" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      },
+      "get": {
+        "operationId": "accounts.list",
+        "summary": "List the operator's accounts.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The account roster.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/accounts/{account_id}/disable": {
+      "post": {
+        "operationId": "accounts.disable",
+        "summary": "Administratively disable an account.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "reason": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The disable outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/accounts/{account_id}/enable": {
+      "post": {
+        "operationId": "accounts.enable",
+        "summary": "Re-enable a disabled account.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "reason": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The enable outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/accounts/{account_id}/usage": {
+      "get": {
+        "operationId": "accounts.usage",
+        "summary": "Read an account's usage counters.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The usage counters.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AccountUsage" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to read this account." }
+        }
+      }
+    },
+    "/accounts/{account_id}/ledger-adjustment": {
+      "post": {
+        "operationId": "accounts.ledgerAdjust",
+        "summary": "Apply a manual balance adjustment.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount_usd_micros", "reason"],
+                "properties": {
+                  "amount_usd_micros": {
+                    "type": "integer",
+                    "description": "Signed micro-USD delta."
+                  },
+                  "reason": { "type": "string", "minLength": 3 },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optional caller-supplied idempotency reference. Pins the entry's (kind, ref) key to the originating event so a redelivered call is a no-op. Omitted, a fresh per-call ref is minted."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The adjustment outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No such account under this operator." },
+          "409": {
+            "description": "The account is not active (disabled or being closed), so a positive credit is refused atomically — no balance is moved (code account-not-active). Debits and reversals are still accepted; re-enable the account, then retry the credit.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "422": {
+            "description": "The adjustment was rejected (cap, reason, or overdraft).",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/ledger-clamp-debit": {
+      "post": {
+        "operationId": "accounts.ledgerClampDebit",
+        "summary": "Debit a balance toward zero by up to an amount, clamped at the available balance.",
+        "description": "Removes from the balance only what it can cover and returns the amount actually debited, so a clawback caller carries the uncovered remainder as its own arrears without a stale stamp-time balance read. Never overdraws; idempotent on ref.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount_usd_micros", "reason", "ref"],
+                "properties": {
+                  "amount_usd_micros": {
+                    "type": "integer",
+                    "description": "Positive micro-USD amount to debit, clamped at the available balance."
+                  },
+                  "reason": { "type": "string", "minLength": 3 },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Required idempotency reference (the originating clawback id). A redelivered call returns the same debited amount without moving the balance again."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The clamped-debit outcome.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ClampedDebitResult" }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "422": {
+            "description": "The debit was rejected (non-positive amount, cap, reason, or empty ref).",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/margin": {
+      "put": {
+        "operationId": "accounts.setMargin",
+        "summary": "Set an account's markup override.",
+        "description": "Set (or replace) the per-account margin override the pricing seam prefers over the operator-default margin. A control plane computes its own effective percentage from whatever policy it runs and pushes it here; the base plane models only default-vs-override. Idempotent.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["margin_pct"],
+                "properties": {
+                  "margin_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "The markup as a non-negative fraction (e.g. 0.25 = 25%)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The override was set; echoes margin_pct and margin_source 'account-override'."
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No such account under this operator." },
+          "422": {
+            "description": "The override was rejected (a negative percentage).",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "accounts.clearMargin",
+        "summary": "Clear an account's markup override.",
+        "description": "Remove the per-account margin override, reverting the account to the operator-default margin. Idempotent: clearing a missing override succeeds with cleared=false.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The override was cleared (or none was present); echoes margin_source 'operator-default'."
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No such account under this operator." }
+        }
+      }
+    },
+    "/accounts/{account_id}/token": {
+      "post": {
+        "operationId": "accounts.mintToken",
+        "summary": "Mint an account-scoped data-plane token.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The data-plane scopes the token carries; an empty or omitted list mints a token with no scopes. Every scope must exist in the instance's scope registry. The core registry values are poe:read, poe:create, account:read, webhooks:read, webhooks:write, and billing:read; an operator may register additional vendor scopes in the registry. An unknown scope is rejected with a 422 problem whose detail lists the registered names.",
+                    "examples": [["poe:create", "account:read"], ["poe:read"]]
+                  },
+                  "rate_limit_per_min": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000,
+                    "description": "Optional per-minute request budget the data-plane limiter meters this token against. Omitted, the token meters against the data-plane default budget (the same fallback an api key without a custom budget uses)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The minted account token.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AccountToken" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to act on this account." },
+          "422": {
+            "description": "An unknown scope or invalid input; the problem detail lists the registered scope names.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/keys": {
+      "post": {
+        "operationId": "accounts.keys.create",
+        "summary": "Create an api key for the account.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["scopes"],
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The data-plane scopes the key carries; must be non-empty. Every scope must exist in the instance's scope registry. The core registry values are poe:read, poe:create, account:read, webhooks:read, webhooks:write, and billing:read; an operator may register additional vendor scopes in the registry. An unknown scope is rejected with a 422 problem whose detail lists the registered names.",
+                    "examples": [["poe:read", "poe:create"], ["account:read"]]
+                  },
+                  "rate_limit_per_min": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 1000000,
+                    "description": "Optional per-minute request budget the data-plane limiter meters this key against. Omitted or null, the key meters against the data-plane default budget (the same fallback an account token without a custom budget uses)."
+                  },
+                  "label": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created key, with its secret shown once.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CreatedKey" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to act on this account." },
+          "422": {
+            "description": "An unknown scope or invalid input; the problem detail lists the registered scope names.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "accounts.keys.list",
+        "summary": "List the account's api keys.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key listing (metadata only; secrets are never returned).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to read this account." }
+        }
+      }
+    },
+    "/accounts/{account_id}/keys/{key_id}/revoke": {
+      "post": {
+        "operationId": "accounts.keys.revoke",
+        "summary": "Revoke an api key.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The revoke outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to act on this account." }
+        }
+      }
+    },
+    "/accounts/{account_id}/keys/{key_id}/relabel": {
+      "post": {
+        "operationId": "accounts.keys.relabel",
+        "summary": "Relabel an api key.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "label": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The relabel outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Not permitted to act on this account." }
+        }
+      }
+    },
+    "/wallets": {
+      "post": {
+        "operationId": "wallets.register",
+        "summary": "Register a wallet from a keyring entry.",
+        "description": "Requires the operator root credential. Registration binds a shared-keyring Cardano signing key to an owning operator, so it is an instance-administrator action: an ordinary operator token must not claim a key it merely shares custody of, which would let a second tenant register another tenant's wallet address and spend its funds. A wallet is a global on-chain identity: there is one row per (network, address). The registering operator administers it and is always entitled to spend it. `address` must be a verified Cardano payment address the instance physically holds a signing key for (derived from the signing key at keyring unlock), so a row is never written for an address the submit path could never sign. The optional `scope` is the spend grant the registration confers (defaults to the instance's configured default scope): `service` (every operator/account may spend it), `operator` (the registrar only), or `account` (a named account the registrar owns, requiring `scope_account_id`). The resolved grant is auto-issued and its id is returned so the caller can revoke it without a list call; re-registering an already-owned wallet re-asserts the grant idempotently. Grants on an already-owned wallet stay operator-manageable.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["label", "address", "network"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "address": { "type": "string" },
+                  "network": { "type": "string", "enum": ["mainnet", "preprod", "preview"] },
+                  "scope": { "type": "string", "enum": ["service", "operator", "account"] },
+                  "scope_account_id": { "type": "string", "format": "uuid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The registered wallet id, whether it was newly created, and the auto-issued grant id."
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "The presented credential is not the operator root." },
+          "409": {
+            "description": "The address is already registered as a wallet by another operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "422": {
+            "description": "The address is not a valid payment address for the requested network, or an invalid scope.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "wallets.list",
+        "summary": "List the operator's wallets with UTxO statistics.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The wallet roster.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/wallets/operator-balance": {
+      "get": {
+        "operationId": "wallets.operatorBalance",
+        "summary": "The operator's live on-chain ADA balance per signing wallet.",
+        "description": "A LIVE chain read backing an explicit operator refresh: for every Cardano signing wallet the operator administers, the total lovelace across its address's UTxOs read from Koios, alongside the database roster. Degrades gracefully: a deployment with no chain seam reports chain_configured false; an unreachable provider lands as a per-wallet balance_error while every other wallet still serves.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The live per-wallet ADA position.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OperatorWalletBalance" }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/wallets/{wallet_id}/drain": {
+      "post": {
+        "operationId": "wallets.drain",
+        "summary": "Transition a wallet from active to draining.",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "reason": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The drain outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/wallets/{wallet_id}/reactivate": {
+      "post": {
+        "operationId": "wallets.reactivate",
+        "summary": "Transition a draining wallet back to active.",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "reason": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The reactivate outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/wallets/{wallet_id}/grants": {
+      "post": {
+        "operationId": "wallets.grants.issue",
+        "summary": "Issue a spend grant on a wallet.",
+        "description": "Only the wallet's registrar may grant on it. The `scope` is `service` (every operator/account may spend it), `operator` (the registrar), or `account` (a named account the registrar owns, requiring `account_id`). Issuing is idempotent per scope subject.",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["scope"],
+                "properties": {
+                  "scope": { "type": "string", "enum": ["service", "operator", "account"] },
+                  "account_id": { "type": "string", "format": "uuid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "The grant id and whether it was newly issued." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No wallet (or account) the operator administers matches." },
+          "422": {
+            "description": "An invalid scope or missing account_id.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/wallets/{wallet_id}/grants/{grant_id}/revoke": {
+      "post": {
+        "operationId": "wallets.grants.revoke",
+        "summary": "Revoke a spend grant on a wallet.",
+        "description": "Only the wallet's registrar may revoke a grant on its own wallet. Revocation gates new picks only; an in-flight submit keys on the wallet id and still settles.",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The revoke outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No grant on a wallet the operator administers matches." }
+        }
+      }
+    },
+    "/storage/sources": {
+      "post": {
+        "operationId": "storage.sources.register",
+        "summary": "Register a storage funding source from a keyring Arweave entry.",
+        "description": "Requires the operator root credential. Registration binds a shared-keyring Arweave key to an owning operator, so it is an instance-administrator action: an ordinary operator token must not claim a key it merely shares custody of. A funding source is a global identity: one row per (backend, arweave_address), the credit pool attached to one address at one provider. `address` must be a verified Arweave address the instance physically holds a signing key for (derived from the JWK at keyring unlock), so a row is never written for an address no signer can back. The optional `scope` is the draw grant the registration confers (defaults to the instance's configured default storage scope): `service` (every account may draw it), `operator` (the registrar only), or `account` (a named account the registrar owns, requiring `scope_account_id`). The resolved grant is auto-issued; a `service` scope converges on the backend's existing live service grant if one exists. Grants on an already-owned source stay operator-manageable.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["label", "backend", "address"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "backend": { "type": "string", "enum": ["turbo", "direct-arweave", "arlocal"] },
+                  "address": {
+                    "type": "string",
+                    "description": "A verified Arweave address the instance holds a signing key for."
+                  },
+                  "scope": { "type": "string", "enum": ["service", "operator", "account"] },
+                  "scope_account_id": { "type": "string", "format": "uuid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The registered source id, whether it was newly created, and the auto-issued grant id."
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "The presented credential is not the operator root." },
+          "409": {
+            "description": "The address is already registered as a funding source by another operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "422": {
+            "description": "An unknown backend, an address no signing key backs, or an invalid scope.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "storage.sources.list",
+        "summary": "List the operator's funding sources with cached credit diagnostics.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The funding-source roster.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/storage/sources/{source_id}/drain": {
+      "post": {
+        "operationId": "storage.sources.drain",
+        "summary": "Transition a funding source from active to draining.",
+        "description": "A draining source takes no new charges; an in-flight upload settles by source id and is never stranded.",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "reason": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The drain outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No source the operator owns matches." }
+        }
+      }
+    },
+    "/storage/sources/{source_id}/grants": {
+      "post": {
+        "operationId": "storage.sources.grants.issue",
+        "summary": "Issue a draw grant on a funding source.",
+        "description": "Only the source's owner may grant on it. The `scope` is `service` (every account may draw it), `operator` (the registrar), or `account` (a named account the registrar owns, requiring `account_id`). Issuing is idempotent per scope subject.",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["scope"],
+                "properties": {
+                  "scope": { "type": "string", "enum": ["service", "operator", "account"] },
+                  "account_id": { "type": "string", "format": "uuid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "The grant id and whether it was newly issued." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No source (or account) the operator owns matches." },
+          "422": {
+            "description": "An invalid scope or missing account_id.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/storage/sources/{source_id}/grants/{grant_id}/revoke": {
+      "post": {
+        "operationId": "storage.sources.grants.revoke",
+        "summary": "Revoke a draw grant on a funding source.",
+        "description": "A soft revoke (it marks the grant revoked and is idempotent, not a resource delete), so it mirrors the wallet grant-revoke verb and shape: POST .../revoke. Only the source's owner may revoke a grant on its own source. Revocation gates new charges only; an in-flight upload keys on the source id and still settles.",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The revoke outcome." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No grant on a source the operator owns matches." }
+        }
+      }
+    },
+    "/storage/funding": {
+      "get": {
+        "operationId": "storage.funding",
+        "summary": "Aggregate funding status across the operator's sources.",
+        "description": "Rolls up the cached believed winc and provider-reported fundable bytes across every source the operator owns, with a stale-source count. Reads cached rows only; makes no provider call.",
+        "responses": {
+          "200": {
+            "description": "The aggregate funding status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/FundingStatus" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/storage/operator-balance": {
+      "get": {
+        "operationId": "storage.operatorBalance",
+        "summary": "The operator's live storage funding position.",
+        "description": "A LIVE provider read backing an explicit operator refresh: per funding wallet, the on-chain AR balance from the configured Arweave node and, on the Turbo backend, the live prepaid winc balance from the payment service. Degrades gracefully: no [storage] reports storage_configured false; a backend with no payment service marks the Turbo fields unavailable with reason turbo-not-active; an unreachable provider lands as a per-field error while the rest still serves.",
+        "responses": {
+          "200": {
+            "description": "The live funding position.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OperatorStorageBalance" }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/storage/top-up": {
+      "post": {
+        "operationId": "storage.topUps.create",
+        "summary": "Convert AR into prepaid provider upload credits.",
+        "description": "Signs and broadcasts an on-chain AR transfer from the operator's funding wallet to the provider's deposit wallet, then registers the transaction with the payment service, which credits the winc once the transfer confirms. IRREVERSIBLE: credits can never be converted back to AR. Owner-only: the source must be owned by the calling operator and active. The live wallet balance must cover amount + fee or the request is refused before signing. IDEMPOTENT on the required idempotency_key, scoped to the calling operator: a repeat call with the same key (and the same source + amount) replays the already-journalled conversion as a 200 — converging it forward through broadcast/registration exactly like the register route, never signing a second transfer — while a new key signs a new conversion and returns 201. Reusing a key with a different source or amount is refused. A broadcast/registration failure is recorded on the returned record and retried FORWARD via the register route or a same-key repeat, never by re-signing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ar_amount_winston", "idempotency_key"],
+                "properties": {
+                  "ar_amount_winston": {
+                    "type": "string",
+                    "description": "The winston to convert, as a decimal string (winston amounts overflow a JSON-safe integer; a small JSON integer is also accepted)."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The caller's unique name for this conversion (unique per operator). Retrying a lost response with the same key replays the existing conversion instead of signing a second irreversible transfer; use a fresh key (e.g. a UUID) for each new top-up."
+                  },
+                  "funding_source_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The source to fund; optional when the operator owns exactly one active source on the backend."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversion this idempotency key already created, replayed (converged forward, never re-signed).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/StorageTopUp" } }
+            }
+          },
+          "201": {
+            "description": "The recorded conversion and how far it progressed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/StorageTopUp" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No active source the operator owns matches." },
+          "422": {
+            "description": "Validation failed: malformed amount, missing or blank idempotency_key, an idempotency_key reused with a different source or amount, insufficient wallet balance, no payment service on this backend (turbo-not-active), or no active funding source (no-funding-source)."
+          }
+        }
+      }
+    },
+    "/storage/top-ups": {
+      "get": {
+        "operationId": "storage.topUps.list",
+        "summary": "The operator's AR -> credit conversion journal.",
+        "description": "Every top-up against a source the operator owns, newest-first.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 500 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversion journal page.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/storage/top-ups/{topup_id}/register": {
+      "post": {
+        "operationId": "storage.topUps.register",
+        "summary": "Retry an unfinished top-up forward.",
+        "description": "Re-broadcasts the persisted, byte-identical transfer when its broadcast is unconfirmed, then re-registers the same transaction id with the payment service. Never re-signs (a re-sign would mint a second transfer and move the funds twice). Idempotent for an already-registered top-up.",
+        "parameters": [
+          {
+            "name": "topup_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The top-up after the retry pass.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/StorageTopUp" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": { "description": "No top-up against a source the operator owns matches." },
+          "422": {
+            "description": "The deployment has no payment service to register with (turbo-not-active / storage-not-configured)."
+          }
+        }
+      }
+    },
+    "/chain/provider-usage": {
+      "get": {
+        "operationId": "chain.providerUsage",
+        "summary": "Per-day chain-provider request usage.",
+        "description": "The per-(provider, network, UTC day) request counts the chain egress gate records: requests issued to each provider and requests the instance's local egress budget denied. Instance-level diagnostics for provider-quota visibility; carries no per-account data. Reads cached rows only; makes no provider call. Rows sort newest day first.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "How many trailing UTC days to return (today inclusive). Defaults to 7, clamped to 1..=90.",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The per-day provider usage rows (newest first).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/pricing/fx": {
+      "get": {
+        "operationId": "pricing.fx",
+        "summary": "The live FX snapshot quotes are priced from, and its freshness.",
+        "description": "The newest cached FX snapshot the gateway prices every publish from (the FX refresh loop is the only writer): the ADA->USD and per-byte Arweave conversion rates, the snapshot's source and age, and a staleness verdict on the same freshness ceiling the quote path refuses a stale snapshot past, so an operator can catch a stale or wrong oracle before it mis-prices users. A pure cached-row read; makes no provider call. Before the refresh loop has written its first row the response reports available false with stale true rather than erroring.",
+        "responses": {
+          "200": {
+            "description": "The live FX snapshot (or available false on a cold start).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/FxSnapshot" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/webhooks/health": {
+      "get": {
+        "operationId": "webhooks.health",
+        "summary": "The webhook health summary across the operator's subscriptions.",
+        "description": "Per-endpoint health for the operator's own firehose subscriptions and the account-scoped subscriptions under accounts the operator owns: dead and pending delivery counts, the oldest pending instants, the auto-disable accumulator, and the last success. Endpoints sort worst-first. Reads the live health view; attempts no delivery.",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "The webhook health summary (worst-first).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "operationId": "webhooks.create",
+        "summary": "Register an operator firehose subscription.",
+        "description": "Registers a delivery target that receives every event under the operator: the events of every account it owns plus its operator-plane-only subjects (storage funding refunds). The URL is validated through the SSRF guard. A signing secret is minted and returned exactly once; it is encrypted at rest and never returned again (later reads carry only its fingerprint). A subscription receives exactly the events fanned out after it is created; there is no backfill. Requires operator authority.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/WebhookCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The firehose subscription was registered; the signing secret is returned once.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebhookCreatedEndpoint" }
+              }
+            }
+          },
+          "400": { "description": "Malformed request body." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "422": {
+            "description": "The URL was rejected by the SSRF guard, or an event filter names an unknown wire event type.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "webhooks.list",
+        "summary": "List the operator's firehose subscriptions.",
+        "description": "Returns every non-deleted firehose subscription the operator owns, newest first, each carrying its secret fingerprint (never the secret) and failure counters. Requires operator authority.",
+        "responses": {
+          "200": {
+            "description": "The operator's firehose subscriptions.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The firehose subscription id."
+        }
+      ],
+      "get": {
+        "operationId": "webhooks.get",
+        "summary": "Read one firehose subscription.",
+        "description": "Returns the firehose subscription owned by the operator. A subscription owned by another operator, soft-deleted, or absent returns 404 identically. Requires operator authority.",
+        "responses": {
+          "200": {
+            "description": "The firehose subscription.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "webhooks.patch",
+        "summary": "Update a firehose subscription.",
+        "description": "Updates the firehose subscription owned by the operator. Move status between active and paused (re-activating resets the auto-disable counter), replace the URL (re-validated through the SSRF guard) or the event filter, and set or clear the label. Requires operator authority.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/WebhookPatchRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated firehose subscription.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+            }
+          },
+          "400": { "description": "Malformed request body." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "422": {
+            "description": "An invalid status, an unknown wire event type, or an SSRF-rejected URL.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "webhooks.delete",
+        "summary": "Delete a firehose subscription.",
+        "description": "Soft-deletes the firehose subscription owned by the operator; it stops matching fan-out immediately. Returns 204 on a delete that took effect, 404 if no such row exists for the operator (including an already-deleted one). Requires operator authority.",
+        "responses": {
+          "204": { "description": "The firehose subscription was deleted." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/rotate-secret": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The firehose subscription id."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.rotateSecret",
+        "summary": "Open a secret rotation window.",
+        "description": "Mints a successor signing secret, seals it at rest, and returns the plaintext exactly once. While the window is open deliveries are dual-signed (one v1 per active secret), so a receiver validates with either; the operator commits once its fleet is cut over. Requires operator authority.",
+        "responses": {
+          "200": {
+            "description": "The rotation window is open; the successor secret is returned once.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebhookRotatedSecret" }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/rotate-secret/commit": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The firehose subscription id."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.rotateSecret.commit",
+        "summary": "Close a secret rotation window.",
+        "description": "Promotes the successor secret to primary and clears the successor, so deliveries drop back to a single v1. Explicit (not auto-on-first-2xx) so a multi-instance receiver is never cut over before its fleet is ready. A commit with no open window is 404. Requires operator authority.",
+        "responses": {
+          "200": {
+            "description": "The rotation window is closed; the successor was promoted.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No open rotation window, or no such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The firehose subscription id."
+        }
+      ],
+      "get": {
+        "operationId": "webhooks.deliveries.list",
+        "summary": "List a firehose subscription's deliveries (the dead-letter view).",
+        "description": "Returns the subscription's deliveries newest first, in every state (pending, delivered, failed). A failed delivery is the dead-letter: it exhausted its attempts and was skipped, leaving a visible seq gap the receiver can detect and the operator can redrive. The endpoint is the ownership gate: a foreign, soft-deleted, or absent subscription returns 404 identically. Requires operator authority.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+            "description": "The page size, clamped to [1, 200]."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscription's deliveries, newest first.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such firehose subscription for this operator.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries/{delivery_id}/retry": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The firehose subscription id."
+        },
+        {
+          "name": "delivery_id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The delivery id to redrive."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.deliveries.retry",
+        "summary": "Redrive a failed firehose delivery.",
+        "description": "Re-arms a failed (dead-letter) delivery: state returns to pending and it becomes immediately due, while attempts is left intact so the prior failures stand and the redelivery reuses the same Webhook-Id and body. A delivery not under an owned endpoint is 404; one that exists but is not failed is 422. Re-enabling a disabled endpoint (PATCH to active) is a separate step. Requires operator authority.",
+        "responses": {
+          "200": { "description": "The delivery was re-armed to pending." },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." },
+          "404": {
+            "description": "No such delivery under an owned firehose subscription.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "422": {
+            "description": "The delivery exists but is not failed (still pending or already delivered).",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "503": {
+            "description": "Webhook subscriptions are not enabled on this deployment.",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "audit.list",
+        "summary": "Query the administrative audit log.",
+        "parameters": [
+          {
+            "name": "actor_kind",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["operator", "account", "system"] }
+          },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "target_type", "in": "query", "schema": { "type": "string" } },
+          { "name": "target_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The audit log page (newest first).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEnvelope" } }
+            }
+          },
+          "401": { "description": "Missing or invalid credential." },
+          "403": { "description": "Operator authority required." }
+        }
+      }
+    }
+  }
+}

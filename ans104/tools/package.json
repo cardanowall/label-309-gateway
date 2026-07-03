@@ -1,0 +1,17 @@
+{
+  "name": "ans104-vector-generator",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Generates the ANS-104 golden vectors from the arbundles/arweave-js reference implementation, and cross-checks crate-signed items against that reference and the Turbo upload service. Not part of any published package; lives next to the Rust crate's vector fixtures purely to produce and validate them.",
+  "scripts": {
+    "generate": "node generate-vectors.mjs",
+    "cross-verify": "node cross-verify.mjs",
+    "live-post": "node live-post.mjs"
+  },
+  "dependencies": {
+    "@ardrive/turbo-sdk": "1.41.3",
+    "@dha-team/arbundles": "1.0.4",
+    "arweave": "1.15.7"
+  }
+}

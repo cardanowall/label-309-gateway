@@ -1,0 +1,20 @@
+# Keep the build context lean and reproducible: only the Cargo workspace source
+# and its committed lockfile need to reach the builder.
+
+# Compiled artifacts (the largest tree by far) are rebuilt inside the image.
+target/
+**/target/
+
+# Version-control metadata, local scratch, and OS cruft are never build inputs.
+.git/
+.gitignore
+tmp/
+**/tmp/
+.DS_Store
+**/.DS_Store
+
+# Deploy assets are consumed on the host, not during the image build. Per-crate
+# README.md files stay (the crate manifests reference them).
+deploy/
+Dockerfile
+.dockerignore

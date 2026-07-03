@@ -1,0 +1,91 @@
+[package]
+name = "gateway"
+version = "0.1.0"
+description = "The gateway application binary: assembles and supervises the Postgres-backed publish/confirm/index/wallet runtime."
+readme = "README.md"
+# The binary is an internal deployment artifact, not a published crate.
+publish = false
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "gateway"
+path = "src/main.rs"
+
+[dependencies]
+gateway-core = { path = "../gateway-core" }
+cardano-poe-tx = { path = "../cardano-poe-tx" }
+
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net"] }
+serde = { workspace = true }
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+zeroize.workspace = true
+# Optional, Sentry-compatible error monitoring (GlitchTip / self-hosted Sentry /
+# hosted Sentry). Inert unless an operator configures a DSN. The transport is
+# reqwest-over-rustls to match the rest of the binary: `default-features = false`
+# drops the bundled native-tls transport so no OpenSSL is ever pulled in. The
+# `backtrace`/`contexts`/`panic` integrations give symbolized backtraces, runtime
+# and OS context, and a panic hook.
+sentry = { version = "0.48", default-features = false, features = [
+  "backtrace",
+  "contexts",
+  "panic",
+  "reqwest",
+  "rustls",
+] }
+# Forwards `tracing` ERROR events to Sentry as issues (and WARN/INFO as
+# breadcrumbs). Added to the subscriber only when a DSN is configured.
+sentry-tracing = "0.48"
+# The data-plane HTTP server the binary mounts beside the background plane.
+axum = { workspace = true }
+# The global request-timeout layer the binary applies to the control plane (the
+# data plane scopes its own inside the engine's router factory, where the
+# streaming exemptions live).
+tower-http = { workspace = true }
+# The admin CLI is an HTTP client of the control plane (never a direct DB
+# connection), so the contract it drives is exactly the one third parties use.
+# rustls only (no system OpenSSL); blocking, since the CLI is a one-shot command.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "blocking"] }
+# The pricing seam computes a quote's network fee in lovelace and converts it to
+# micro-USD; the markup is an exact fixed-point fraction, and the account id the
+# seam is called with is a UUID.
+rust_decimal = { workspace = true }
+uuid = { workspace = true }
+# The control-plane token TTLs are configured in seconds and converted to the
+# engine's `chrono::Duration` when the control state is built.
+chrono = { workspace = true }
+# The keyring CLI prompts for the passphrase with echo off when no environment
+# secret is set and stdin is a terminal.
+rpassword = { workspace = true }
+# Atomic keyring writes: ciphertext lands in a temp file beside the keyring and
+# is renamed into place, so a crash mid-write never truncates the file.
+tempfile = { workspace = true }
+
+[features]
+# Integration tests that boot the full assembly against a real Postgres are gated
+# behind this feature so the default `cargo test` (and any consumer build) never
+# requires a live database. CI runs `cargo test --features pg-tests`.
+pg-tests = ["gateway-core/pg-tests"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+gateway-core = { path = "../gateway-core", features = ["pg-tests"] }
+# The startup smoke test builds a throwaway age-encrypted operator keyring in
+# process (a deterministic ed25519 key, its derived address, encrypted under a
+# passphrase) so it can exercise the binary's real keyring-unlock path.
+age = { workspace = true }
+bech32 = { workspace = true }
+pallas-crypto = { workspace = true }
+serde_json = { workspace = true }
+# The storage-wiring boot test builds a keyring carrying an Arweave funding entry,
+# deriving the entry's address from a throwaway JWK fixture so the unlock path
+# verifies a real key/address pair.
+ans104 = { path = "../ans104" }

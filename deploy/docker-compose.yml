@@ -1,0 +1,93 @@
+# A minimal, working single-host deployment: Postgres plus the gateway. It is a
+# starting point for a third-party operator, not a turnkey production stack. See
+# README.md in this directory for bootstrap, funding, and the network posture.
+#
+# The gateway publishes NO host port: the data plane and control plane share one
+# socket, so exposing it would expose the control plane too. Reach the control
+# plane from inside the network (`docker compose exec gateway curl ...`) or put a
+# reverse proxy in front that forwards only /api/v1/* publicly and keeps
+# /control/v1 and /admin private. See README.md.
+
+name: label-309-gateway
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_DB: gateway
+      # Sourced from a .env file beside this compose (gitignored). See README.md.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - gateway-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U gateway -d gateway']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gateway:
+    image: ghcr.io/cardanowall/label-309-gateway:latest
+    # Build from source as a fallback when the published image is unavailable.
+    # The context is the repository root, one level up from this directory.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # To reach the data plane from the host during setup, uncomment this and
+    # bind to loopback only (127.0.0.1) so the control plane never faces the
+    # public internet. For public API access, use a reverse proxy instead.
+    # ports:
+    #   - '127.0.0.1:8080:8080'
+    environment:
+      GATEWAY_CONFIG: /etc/gateway/gateway.toml
+      # The URL carries the password inline (there is no _FILE twin for it);
+      # both sides read POSTGRES_PASSWORD from the same .env.
+      GATEWAY_DATABASE_URL: postgres://gateway:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/gateway
+      # The gateway reads the passphrase VALUE from the mounted file, so it never
+      # sits in container env or `docker inspect` output. Names the mounted
+      # keyring ciphertext (agrees with keyring_path in gateway.toml; the
+      # environment takes precedence).
+      GATEWAY_KEYRING_PATH: /run/secrets/gateway-keyring
+      GATEWAY_KEYRING_PASSPHRASE_FILE: /run/secrets/gateway-keyring-passphrase
+      RUST_LOG: info
+    volumes:
+      # The operating config, copied from gateway.example.toml and edited.
+      # Read-only: a config change is a redeploy, not a container write.
+      - ./gateway.toml:/etc/gateway/gateway.toml:ro
+      # Upload staging (scratch + durable) on a named volume so in-flight
+      # resumable-upload sessions and crash-recoverable staged content survive
+      # container recreation.
+      - gateway-staging:/var/lib/gateway
+    # Pin each secret to the image's non-root runtime user (uid/gid 1001),
+    # read-only. The short secret form would land them root-owned and
+    # world-readable inside the container.
+    secrets:
+      - source: gateway-keyring
+        target: gateway-keyring
+        uid: '1001'
+        gid: '1001'
+        mode: 0400
+      - source: gateway-keyring-passphrase
+        target: gateway-keyring-passphrase
+        uid: '1001'
+        gid: '1001'
+        mode: 0400
+
+volumes:
+  gateway-db:
+  gateway-staging:
+
+# Compose file-secrets: each maps to a file the operator places under
+# ./secrets/ (chmod 600, gitignored, never committed). Docker mounts each at
+# /run/secrets/<name> in the gateway container. Add the optional chain / FX /
+# monitoring secrets here as the deployment needs them (see README.md).
+secrets:
+  gateway-keyring:
+    file: ./secrets/gateway-keyring.age
+  gateway-keyring-passphrase:
+    file: ./secrets/gateway-keyring-passphrase

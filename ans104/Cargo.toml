@@ -1,0 +1,33 @@
+[package]
+name = "ans104"
+version = "0.1.0"
+description = "Pure-Rust construction, signing, and verification of ANS-104 (Arweave bundle) data items."
+keywords = ["arweave", "ans-104", "bundle", "data-item", "rsa-pss"]
+categories = ["cryptography", "encoding"]
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+# The `hazmat` feature exposes the raw RSA public operation, used only to
+# recover a PSS signature's salt length so verification can accept any valid
+# salt length; the cryptographic check itself stays on the high-level scheme.
+rsa = { workspace = true, features = ["hazmat"] }
+# The bignum library `rsa` builds on, used directly by the JWK export to compute
+# the CRT parameters (dp, dq, qi) other Arweave tooling expects in a wallet key.
+num-bigint-dig.workspace = true
+sha2.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+thiserror.workspace = true
+# A freshly generated private JWK travels as a JSON string; it is wrapped in a
+# zeroizing buffer so the key material is wiped once the caller stores it.
+zeroize.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

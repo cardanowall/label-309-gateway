@@ -1,0 +1,37 @@
+{
+  "name": "multi_input",
+  "mode": "standard",
+  "protocol": {
+    "min_fee_a": 44,
+    "min_fee_b": 155381,
+    "coins_per_utxo_byte": 4310,
+    "max_tx_size": 16384
+  },
+  "record_len": 1024,
+  "utxos": [
+    {
+      "tx_hash": "6b50678395156a59a7662ee46100aea85f1e251214336d43a96397238a1ae09c",
+      "index": 0,
+      "lovelace": 800000
+    },
+    {
+      "tx_hash": "fbaeec7b2ca9cdc6bf0189392a8ff98d5070b136fa900b7bb0e8a9ba70061243",
+      "index": 1,
+      "lovelace": 800000
+    },
+    {
+      "tx_hash": "c5d086cbe2149a7bb6d4d4ced0804841a3afa0e8c611f19c8a59e859bb529c7b",
+      "index": 2,
+      "lovelace": 800000
+    },
+    {
+      "tx_hash": "1f645dc09647e47158a32dbd9d7aba12d77c9174b5da6a72b7116038f3e97ae2",
+      "index": 3,
+      "lovelace": 800000
+    }
+  ],
+  "validity": null,
+  "expect": "ok",
+  "change_address": "addr_test1vpa8ukd77k05gc3etxeyzylxxmyhzg0hvne9qplxvsyl44q6pl7v4",
+  "network_id": 0
+}

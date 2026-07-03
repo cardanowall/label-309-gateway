@@ -1,0 +1,143 @@
+[package]
+name = "gateway-core"
+version = "0.1.0"
+description = "Postgres-backed job runtime, durable subject events, and namespaced migrations for the gateway engine."
+keywords = ["postgres", "jobs", "queue", "events", "scheduler"]
+categories = ["database", "asynchronous"]
+readme = "README.md"
+# Publishing is decided at release time; the engine is held back until its
+# public surface is stable.
+publish = false
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+sqlx.workspace = true
+# The uploads route streams each multipart part to a tmpfs staging file with a
+# rolling hash, so the engine needs tokio's filesystem and async-IO surfaces on
+# top of the workspace's runtime/sync/time set.
+tokio = { workspace = true, features = ["fs", "io-util"] }
+croner.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+hex.workspace = true
+# Exact fixed-point decimal for the pricing margin (`numeric(6,4)` in Postgres)
+# and the money arithmetic that derives a quote's service cost. A 128-bit decimal
+# avoids the rounding error a binary float would introduce into a per-publish
+# charge; sqlx maps it onto the Postgres `numeric` column directly.
+rust_decimal.workspace = true
+# Async HTTP client for the engine's own outbound traffic — Cardano protocol
+# parameters from a keyless public provider, chain reads, and storage uploads.
+# The FX oracle and webhook delivery instead reach the network through the SDK's
+# synchronous `fetch_outbound` (run on a blocking task), which carries its own
+# client, so the engine's reqwest stays async-only and the background populate
+# loop is its sole network caller here. rustls (no system OpenSSL) only. Held at
+# the 0.13 line the sibling crates use so the workspace resolves a single reqwest.
+# `stream` lets the storage backends POST a multi-gigabyte staged file as a
+# streamed body (`Body::wrap_stream`) so the content is never read into a single
+# buffer; the upload reconstructs the small signed envelope in memory and folds
+# the staged file in as the trailing payload.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+# The deterministic Proof-of-Existence transaction builder, now a regular
+# dependency: the quote prices a canonical transaction shape with it, and the
+# replenisher reuses its linear-fee and minimum-ADA helpers for the split tx.
+cardano-poe-tx = { path = "../cardano-poe-tx" }
+# The replenisher mints several band-sized self-outputs in one transaction (a
+# multi-output shape the single-change-output Proof-of-Existence builder does not
+# emit), so it assembles and signs that transaction directly with the Conway
+# transaction builder and primitives. These are the same crates the
+# Proof-of-Existence builder depends on, pinned at the workspace's single 1.0
+# pallas line so the resolved graph stays coherent.
+pallas-txbuilder = { workspace = true }
+pallas-primitives = { workspace = true }
+pallas-codec = { workspace = true }
+# The Label 309 structural validator and COSE primitives. The single
+# chain_records writer validates each transaction's metadata and derives its
+# indexed columns (item count, first item's scheme, the first signer's Ed25519
+# key) with the same library the standalone verifier uses, so a record indexed
+# here matches one verified anywhere else. The `client` feature is on for the
+# webhook delivery path: it routes every outbound POST through the SDK's
+# `Webhook`-purpose egress (`assert_webhook_url_safe` + the DNS-pinning,
+# redirect-refusing, proxy-disabled `ReqwestTransport::pinned`), reusing the SDK's
+# audited SSRF chokepoint rather than building a weaker one here.
+cardanowall = "=0.8.0"
+# Operator keyring: an age-encrypted JSON envelope (scrypt passphrase recipient)
+# decrypted in process, plus bech32 decode/encode for the wallets' ed25519
+# signing keys and their derived Cardano payment addresses.
+age = { workspace = true }
+bech32 = { workspace = true }
+zeroize = { workspace = true }
+# XChaCha20-Poly1305 to encrypt a webhook signing secret at rest under a symmetric
+# data key. The signer must read the secret back to MAC each delivery, so a
+# one-way hash (the api-key model) cannot serve; the secret is sealed under a
+# 32-byte data key and only its fingerprint is shown after create.
+chacha20poly1305 = { workspace = true }
+# HMAC-SHA256 over "{timestamp}.{body}" for the webhook delivery signature, dual-
+# signed (one MAC per active secret) during a rotation window.
+hmac = { workspace = true }
+# The OS CSPRNG that mints the 32-byte webhook secret-wrap data key and the AEAD
+# nonce for each encrypted secret.
+getrandom = { workspace = true }
+# Ed25519 key handling and the Blake2b hashes (224-bit key hash, 256-bit body
+# hash) used to derive a payment address from a verification key and to sign a
+# transaction body.
+pallas-crypto = { workspace = true }
+pallas-addresses = { workspace = true }
+# The HTTP data plane. The router factory and every handler live here so an
+# embedding application can mount the same router beside its own routes; the
+# binary mounts it under the background plane's supervised JoinSet.
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+futures-util = { workspace = true }
+# Constant-time compare for the API-key full-hash check.
+subtle = { workspace = true }
+# Crockford base32 for the wire id codec (`poe_<base32-of-uuid>`).
+data-encoding = { workspace = true }
+# ANS-104 data-item signing for the Turbo / direct-Arweave storage backends.
+ans104 = { path = "../ans104" }
+# Tmpfs-backed staging for content uploads: each multipart part streams into a
+# named temporary file, rolling-hashed as it lands, so a multi-gigabyte blob is
+# never buffered in memory. The file is removed when its guard drops.
+tempfile = { workspace = true }
+# SHA-256 for the API-key hash, the idempotency request hash, and the record
+# dedup hash. Held at the 0.10 line the workspace resolves.
+sha2 = { workspace = true }
+# Base64 for the record metadata projection (canonical-CBOR bytes -> base64).
+base64 = { workspace = true }
+
+[dev-dependencies]
+# Integration tests spin up the multi-threaded runtime and drive the engine
+# end to end; the smoke test additionally needs the timer.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+# BLAKE2b-224 for building the CIP-19 stake-address claims that wallet-path
+# record-signature tests bind their signer keys under (the SDK verifies the
+# claim but does not expose the hash). Same version the SDK already resolves.
+blake2 = "0.10.6"
+# Self-dependency that turns on `testsupport` for this crate's own test/example
+# targets. Integration tests live in separate crates, so an in-crate `#[cfg(test)]`
+# would not reach them; enabling the feature here exposes the test-only seams
+# (e.g. the unforgeable-capability mint) to the integration suites WITHOUT making
+# them part of the normal `cargo build`/release surface.
+gateway-core = { path = ".", features = ["testsupport"] }
+
+[features]
+# Integration tests that talk to a real Postgres are gated behind this feature
+# so the default `cargo test` (and any consumer's build) never requires a live
+# database. CI runs `cargo test --features pg-tests` against a postgres service.
+# It implies `testsupport` so the pg suites also see the test-only seams.
+pg-tests = ["testsupport"]
+# Test-only seams that must never exist in a normal build: constructors and
+# helpers that bypass a runtime invariant for the convenience of a test (for
+# example, minting a spend capability without a database round trip). Off by
+# default; the dev-dependency self-reference above turns it on for this crate's
+# own tests, and `pg-tests` implies it. A production/release build leaves it off,
+# so the seams are simply absent.
+testsupport = []

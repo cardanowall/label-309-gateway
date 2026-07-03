@@ -1,0 +1,4 @@
+# Selection manifests are regenerated on demand by the manifest test
+# (`POE_EMIT_MANIFESTS=1 cargo test`); they are derived artifacts, not
+# checked-in fixtures. Ignore everything here except this file.
+*.json

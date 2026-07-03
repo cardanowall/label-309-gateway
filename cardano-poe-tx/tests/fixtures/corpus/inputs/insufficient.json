@@ -1,0 +1,22 @@
+{
+  "name": "insufficient",
+  "mode": "standard",
+  "protocol": {
+    "min_fee_a": 44,
+    "min_fee_b": 155381,
+    "coins_per_utxo_byte": 4310,
+    "max_tx_size": 16384
+  },
+  "record_len": 1024,
+  "utxos": [
+    {
+      "tx_hash": "cc4a3604733b4f7af428c1b75deb82bb5270b2da64feb9029652bbdd05359a8a",
+      "index": 0,
+      "lovelace": 200000
+    }
+  ],
+  "validity": null,
+  "expect": "insufficient_funds",
+  "change_address": "addr_test1vpa8ukd77k05gc3etxeyzylxxmyhzg0hvne9qplxvsyl44q6pl7v4",
+  "network_id": 0
+}

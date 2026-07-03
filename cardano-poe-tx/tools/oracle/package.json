@@ -1,0 +1,20 @@
+{
+  "name": "cardano-poe-tx-oracle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Out-of-tree reference oracle for the deterministic Cardano label-309 transaction builder. Rebuilds each corpus case with two independent encoders (Cardano Serialization Library and Lucid Evolution) and compares fee and bytes against the builder's emitted manifest.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "oracle": "node generate-oracle.mjs"
+  },
+  "dependencies": {
+    "@emurgo/cardano-serialization-lib-nodejs": "15.0.3",
+    "@lucid-evolution/lucid": "0.4.34",
+    "@noble/hashes": "2.2.0",
+    "cbor2": "^2.3.0"
+  },
+  "overrides": {
+    "ip-address": "^10.1.1"
+  }
+}

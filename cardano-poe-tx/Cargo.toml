@@ -1,0 +1,57 @@
+[package]
+name = "cardano-poe-tx"
+version = "0.1.0"
+description = "Deterministic Cardano metadata-transaction builder for Proof-of-Existence under metadata label 309."
+keywords = ["cardano", "label-309", "proof-of-existence", "transaction", "metadata"]
+categories = ["cryptography::cryptocurrencies"]
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+pallas-txbuilder.workspace = true
+pallas-primitives.workspace = true
+pallas-codec.workspace = true
+pallas-crypto.workspace = true
+pallas-addresses.workspace = true
+serde.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+# Blocking HTTP client, only ever linked into the network smoke binary (see the
+# `[[bin]]` table below). The library itself performs no I/O and depends on none
+# of this. Held at the same 0.13 line the reference SDK uses so the workspace
+# resolves a single reqwest.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "json",
+    "blocking",
+], optional = true }
+# Matches the bech32 the address crate already pulls in, so the smoke binary
+# adds no second copy.
+bech32 = { version = "0.12", optional = true }
+# JSON only for the smoke binary's Koios request/response shapes. Optional so a
+# default library build does not link it.
+serde_json = { workspace = true, optional = true }
+
+[features]
+# The preprod smoke binary reaches out to a Koios endpoint and a submit API. It
+# is excluded from a default build so the published library carries no HTTP
+# stack and stays provably side-effect free.
+smoke = ["dep:reqwest", "dep:bech32", "dep:serde_json"]
+
+[[bin]]
+name = "preprod-smoke"
+required-features = ["smoke"]
+
+[dev-dependencies]
+# The corpus harness reads JSON fixtures and decodes the built transaction body
+# back into its typed form to assert on individual fields (validity interval,
+# input set) and to recompute the auxiliary-data hash independently.
+serde_json.workspace = true
+pallas-primitives.workspace = true
+pallas-codec.workspace = true
+pallas-crypto.workspace = true

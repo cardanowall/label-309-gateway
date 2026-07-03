@@ -1,0 +1,4028 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Label 309 Gateway API",
+    "version": "1.0.0",
+    "description": "The Label 309 Proof-of-Existence gateway HTTP API: quote, publish (single and batch), upload content for storage, list and retrieve on-chain records (everything a standalone verifier needs), read the account balance, and stream record/balance events.\n\nMost mutating endpoints require a Bearer API key carrying the relevant scope; the record collection and single-record reads are callable anonymously. The bearer key prefix, the error documentation base URL (the problem `type` member), and the server URLs are operator-configured per deployment.",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "This deployment's data-plane base (the origin is operator-configured; the version segment is fixed)."
+    }
+  ],
+  "paths": {
+    "/poe/uploads": {
+      "post": {
+        "operationId": "poe.uploads",
+        "tags": ["PoE"],
+        "summary": "Upload up to 32 binary files to a storage backend. Returns one URI per file, charged per byte at upload.",
+        "description": "Multipart-only endpoint. Accepts an optional `target` (absent or `arweave`; any other value is rejected `400 unsupported-storage-target`) plus `file_0`..`file_31` binary fields. Each file is streamed to a staging file and deduped by content hash per account (re-uploading identical bytes returns the prior receipt with no new charge). Content within the free-storage window posts at zero charge; content beyond it is BILLED at upload, success-gated: the storage charge is reserved before the provider is paid and applied only when the upload lands (a failed upload is never charged). The response is always 200 (no all-or-nothing): each entry in `uploads[]` is `{ok: true, idx, uri, sha256, bytes, charged_usd_micros?}` (success — `charged_usd_micros` is the storage USD applied, present on a billed or free upload), `{accepted: true, idx, attempt_id}` (the bytes are already in flight under a concurrent upload of the same content — poll GET /api/v1/poe/uploads/attempts/{attempt_id} for the terminal outcome), or `{ok: false, idx, error: {code, detail}}` (failure — retry only this index). Supplying an `Idempotency-Key` header makes the whole batch response replayable after it commits; the key is keyed on (method, path) only (the multipart body is not hashed), so it is the caller's promise that a retried batch is the same one. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opt-in whole-batch request replay. The first request under a key stores its committed batch response; a later request with the same key replays it verbatim (with an `Idempotent-Replayed: true` header). The hash is over (method, path) only, because the multipart body is multi-gigabyte-streamed and cannot be buffered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/PoeUploadsMultipartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — upload batch completed. Per-file outcomes in `uploads[]` (ok, accepted, or error). Storage beyond the free window is charged at upload, success-gated; the publish quote (POST /poe/quote) still prices network + storage + service.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/UploadsBadRequestResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/EnvelopeTooLargeResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/poe/uploads/attempts/{attempt_id}": {
+      "get": {
+        "operationId": "poe.uploads.attempt",
+        "tags": ["PoE"],
+        "summary": "Poll the terminal outcome of an upload attempt.",
+        "description": "The authoritative read of an upload attempt's outcome, for a client that received an `accepted` per-file result (its bytes were in flight under a concurrent upload) or whose original upload connection dropped. Returns `reserved` (still in flight — re-poll), `committed` (success, with the `uri` and `charged_usd_micros`), or `released` (failure, with a `reason`). The row is read after the terminal compare-and-set, so the result is never a dangling pointer. An attempt the caller does not own returns 404 indistinguishably from a non-existent one. This poll is AUTHORITATIVE for the outcome; the account event stream (GET /api/v1/account/balance/events) is a latency optimisation that merely prompts an earlier re-poll. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The upload attempt id returned in an `accepted` per-file result."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the attempt's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadAttempt"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/poe/quote": {
+      "post": {
+        "operationId": "poe.quote",
+        "tags": ["PoE"],
+        "summary": "Lock the price for an upcoming /publish call. Returns a quote_id valid for 15 minutes.",
+        "description": "Computes the cost of an upcoming publish from current FX (ADA/USD, AR/USD/byte, Cardano protocol params) plus the account margin, persists a publish_quote row, and returns the `quote_id` plus a breakdown of network + storage + service margin (USD-micros each, decimal strings to preserve bigint precision over JSON). The quote is valid for 15 minutes; POST /api/v1/poe/publish carries the `quote_id` and the server consumes it atomically with the balance debit. The response includes `fx_age_seconds`, the age of the underlying FX snapshot at quote time — the server does NOT gate on this; callers may implement their own age tolerance if needed. Quoting fails with 503 service-unavailable only when no FX rate snapshot exists at all (a cold-start pathology). Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoeQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — quote issued.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidBodyResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "402": {
+            "$ref": "#/components/responses/StorageFundingRefusedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/FxStaleResponse"
+          }
+        }
+      }
+    },
+    "/poe/publish": {
+      "post": {
+        "operationId": "poe.publish",
+        "tags": ["PoE"],
+        "summary": "Publish a finalised Label 309 record to Cardano. JSON only; storage URIs must already be substituted.",
+        "description": "Accepts a finalised canonical-CBOR record (hex) plus the `quote_id` from a prior POST /api/v1/poe/quote, and submits the record to Cardano under metadata label 309. The record MUST already carry its final `ar://` (or `ipfs://`, when supported) URIs: files are uploaded first via POST /api/v1/poe/uploads and the returned URIs belong in the record before it is published; a structurally invalid record is rejected with 422 `validation-failed`. Dedups by `sha256(record_bytes)` per account so a retry of the exact same record returns the existing resource (200) without spawning a duplicate Cardano submission and without consuming the quote. New submissions return 202 with `id`, `status: \"submitting\"`, and `balance_after_usd_micros` (decimal string). The Cardano `tx_hash` is populated asynchronously by the cardano-confirm worker; subscribe to GET /api/v1/poe/events/{poe_id} for live updates. The 402 problem document embeds `balance_usd_micros` and `required_usd_micros` (decimal strings, micro-USD) as extension members so the client can show the payer exactly how short the account is. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoePublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — dedup hit; existing resource returned. No balance change.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoePublishResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "202 — new record accepted; resource `id` assigned, tx_hash pending. Returns `balance_after_usd_micros` as a decimal string.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoePublishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidBodyResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "402": {
+            "$ref": "#/components/responses/InsufficientFundsResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuoteNotFoundResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuoteAlreadyConsumedResponse"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuoteExpiredResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailedResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/poe/publish-batch": {
+      "post": {
+        "operationId": "poe.publishBatch",
+        "tags": ["PoE"],
+        "summary": "Publish 1..50 finalised records as independent Cardano transactions. Partial-success per record.",
+        "description": "Batch variant of POST /api/v1/poe/publish. Each entry in `records[]` carries its own `quote_id` and is validated and submitted independently — per-record failures (including 402 insufficient-funds, 410 quote-expired, 409 quote-already-consumed, 404 quote-not-found) land in `results[]` without aborting siblings. The response carries an aggregate `balance_after_usd_micros` reflecting all per-record debits that landed. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoePublishBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — per-record results array (success or failure entries). Each failure entry surfaces its problem-style code + extensions.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoePublishBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidBodyResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/IdempotencyKeyConflictResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/BatchTooLargeResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/records": {
+      "get": {
+        "operationId": "records.list",
+        "tags": ["Records"],
+        "summary": "List label-309 records the indexer has persisted. Filterable, paginated, anonymous-friendly.",
+        "description": "The open-standard indexer query API. Returns a paginated, filterable view of every label-309 PoE the indexer has captured, projected to the same RecordResource shape served by the single-record routes. Anonymous by default; Bearer auth is optional and affects two things: owner-only fields (currently just `account_id`) are surfaced for rows the caller owns, AND owner viewers additionally see their own un-anchored submitter-mirror rows (`block_height === null`, `status` `submitting` / `failed`) as a small page-1 subsection prepended to the chain-anchored portion (these rows do NOT participate in cursor pagination; the cursor walks the chain-anchored set exclusively). Anonymous and cross-account callers see only chain-anchored rows so the result set cannot be used as a side-channel oracle for unconfirmed submit activity. Pagination uses an opaque base64url cursor — callers must NOT crack it open. The `recipient` filter is currently rejected with 501 not-implemented because the indexer enforces a zero-knowledge invariant (no per-recipient correlator persisted); clients must trial-decrypt sealed records locally to find their own.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "label",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": false,
+            "description": "A signer's raw 32-byte Ed25519 public key, hex-encoded (64 lowercase hex). Returns every record this key VERIFIABLY signed — matched against the record's full set of cryptographically-verified signers, so a co-signed record, or one whose signatures were ordered with a different key first, is found by ANY of its verified signers, not only the first. A key a forged signature entry merely names never matches.",
+            "name": "signer",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": false,
+            "name": "recipient",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1", "true", "false"]
+            },
+            "required": false,
+            "name": "sealed",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1", "2"]
+            },
+            "required": false,
+            "name": "scheme",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "from_block",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "to_block",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from_time",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to_time",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — records page returned.",
+            "headers": {
+              "Link": {
+                "description": "RFC 5988 — when `has_more` is true, carries `<...>; rel=\"next\"` pointing at the next page URL.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordsList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidCursorResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/InvalidQueryResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplementedResponse"
+          }
+        }
+      }
+    },
+    "/records/count": {
+      "get": {
+        "operationId": "records.count",
+        "tags": ["Records"],
+        "summary": "Exact count of label-309 records by a given signer (any verified signer of a record). Same filter grammar as the list route.",
+        "description": "The counting counterpart to the list route: the cursor-paginated /api/v1/records feed deliberately carries no total, so a consumer that needs an exact \"how many records match this filter\" (a public profile's proof count, an explorer facet) uses this endpoint. Accepts the same narrowing filters as the list route (`signer`, `scheme`, `sealed`, `from_block`/`to_block`, `from_time`/`to_time`); the count is \"the total matching the same filter as a list page\". Like the list route's `signer`, the count matches ANY verified signer of a record — a co-signed record, or one whose signatures were ordered with a different key first, is counted by any of its verified signers, not only the first. The count is over the public chain-anchored set only — there is no owner-only projection and no per-recipient filter — so the result is identical for every caller. Auth: Bearer (poe:read) OR anonymous (chain data is public); a Bearer is accepted but changes nothing.\n\nSafety: a count's cost is the cardinality of the matching set, not just the index it rides. A COUNT(*) over the whole chain (or over a wide block/time window, which can be most of the chain) is an arbitrarily large scan even when index-backed. The endpoint therefore REQUIRES a `signer`: a count is always scoped to one signer's records, the primary use case, whose cardinality is bounded by that key's lifetime output and which the verified-signer-set index serves directly. `scheme`, `sealed`, and the block/time windows are valid ADDITIONAL narrowing on top of the signer but none bounds the cardinality on its own, so a count without a signer is rejected with 422 validation-failed. The count also runs under a short statement timeout as defense in depth.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": true,
+            "description": "A signer's raw 32-byte Ed25519 public key, hex-encoded. REQUIRED: a count is always scoped to one signer's records (the only bound on the match cardinality). Counts every record this key VERIFIABLY signed — matched against each record's full set of verified signers, so it matches the list route's ?signer= filter (a co-signed or non-first-ordered record is counted by ANY of its verified signers). Omitting it returns 422.",
+            "name": "signer",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1", "true", "false"]
+            },
+            "required": false,
+            "name": "sealed",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1", "2"]
+            },
+            "required": false,
+            "name": "scheme",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Inclusive lower bound on block height. Narrows the signer-scoped count further; it does not, on its own, satisfy the required signer scope.",
+            "name": "from_block",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Inclusive upper bound on block height. Narrows the signer-scoped count further; it does not, on its own, satisfy the required signer scope.",
+            "name": "to_block",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from_time",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to_time",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the exact count of matching records.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordsCount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/CountUnboundedResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/records/{tx_hash}": {
+      "get": {
+        "operationId": "records.get",
+        "tags": ["Records"],
+        "summary": "Fetch a record by its Cardano transaction hash. Content-negotiated between JSON and CBOR.",
+        "description": "Canonical single-record read endpoint, addressed by tx_hash. Content negotiation via RFC 9110 §12.5.1 Accept header:\n- `application/json` (default) → RecordResource: tx_hash, status, block_height, block_time, num_confirmations, scheme (0 open / 1 sealed / 2 passphrase), item_count, signer_ed25519, metadata_cbor_base64. `status` is chain-derived for everyone on anchored rows (`confirming` once `block_height` is set and `num_confirmations < confirmation_depth_threshold`; `confirmed` once at/above the threshold). Un-anchored rows (`block_height === null`) only surface to their owner — they carry `status: \"submitting\"` or `status: \"failed\"`; non-owner callers asking for the same `tx_hash` get 404 not-found, indistinguishable from \"we never indexed this hash\" (oracle-safe). The owner-only `account_id` field is included only when the authenticated caller owns the row.\n- `application/cbor` → the canonical post-chunked-bstr Label 309 metadata bytes. Append-only by tx_hash; never change once indexed. Strong sha256 ETag + Cache-Control: public, max-age=3600, immutable. Public anon-OK; the CBOR branch skips viewer resolution entirely because the bytes carry no owner-only projection. Browser `<a>` clicks can't set Accept, so the route also honours a `?format=cbor` query parameter that dispatches to the same CBOR handler.\n\nAuth: Bearer API key (poe:read scope) OR anonymous (chain data is public).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": true,
+            "name": "tx_hash",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["cbor"],
+              "description": "Optional. When set to `cbor`, returns the canonical Label 309 bytes (equivalent to `Accept: application/cbor`)."
+            },
+            "required": false,
+            "description": "Optional. When set to `cbor`, returns the canonical Label 309 bytes (equivalent to `Accept: application/cbor`).",
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — record found. RecordResource (JSON) or canonical Label 309 bytes (CBOR).",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordResource"
+                }
+              },
+              "application/cbor": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "304 — If-None-Match matched the CBOR resource ETag (CBOR branch only)."
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidTxHashResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "description": "503 — Record not yet indexed (CBOR branch only); retry shortly (Retry-After).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/poe/events/{poe_id}": {
+      "get": {
+        "operationId": "poe.subscribeEvents",
+        "tags": ["PoE"],
+        "summary": "Subscribe to live status updates for a PoE record via Server-Sent Events.",
+        "description": "Authenticates the requester, verifies record ownership, then opens a `text/event-stream`. The path parameter `poe_id` is the Stripe-style prefixed wire id (`poe_<26-char-crockford-base32>`) returned by POST /api/v1/poe/publish; it identifies the record across the publish→confirm lifecycle, including the pre-tx-hash window. Emits an initial `event: state` carrying the row snapshot, then `event: status` frames as `poe_status_changed` NOTIFY events fire (status progression: submitted → confirming → confirmed). An `event: failed` frame is emitted on `cardano_submission_failed`. Keep-alive: `event: ping` every 30s. Scope required: poe:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^poe_[0-9a-hjkmnp-tv-z]{26}$"
+            },
+            "required": true,
+            "name": "poe_id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — SSE stream opened; emits event types `state`, `status`, `failed`, `ping`.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: state\ndata: {\"id\":\"poe_06bqrjg0csvqfanaqexvqexvqc\",\"status\":\"submitted\",\"tx_hash\":null,\"block_height\":null,\"block_time\":null,\"request_id\":\"01977c8a-7c5e-7000-8000-000000000000\"}\n\nevent: status\ndata: {\"id\":\"poe_06bqrjg0csvqfanaqexvqexvqc\",\"status\":\"confirming\",\"tx_hash\":\"a1b2...\"}\n\nevent: ping\ndata: {\"ts\":\"2026-05-22T12:00:00Z\"}\n\n"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPoeIdResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/account/balance/events": {
+      "get": {
+        "operationId": "account.subscribeBalanceEvents",
+        "tags": ["Account"],
+        "summary": "Subscribe to live USD-balance updates for the caller's account via Server-Sent Events.",
+        "description": "Opens a `text/event-stream`. Emits an initial `event: state` with the current USD balance (decimal string of micro-cents), then `event: balance` frames as `account_balance_changed` NOTIFY events fire (filtered server-side by account_id). Each balance frame carries `{balance_usd_micros, kind, amount_usd_micros, request_id}` where `kind` is the `payment.balance_ledger_kind` enum value (`topup_stripe`, `topup_crypto`, `poe_publish`, `refund_rollback`, `refund_user`, `welcome_grant`, `manual_adjustment`). Keep-alive: `event: ping` every 30s. Scope required: account:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — SSE stream opened; emits event types `state`, `balance`, `ping`.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: state\ndata: {\"balance_usd_micros\":\"500000\"}\n\nevent: balance\ndata: {\"balance_usd_micros\":\"1000000\",\"kind\":\"topup_stripe\",\"amount_usd_micros\":\"500000\",\"request_id\":\"01977c8a-7c5e-7000-8000-000000000000\"}\n\nevent: ping\ndata: {\"ts\":\"2026-05-22T12:00:00Z\"}\n\n"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/account/balance": {
+      "get": {
+        "operationId": "account.getBalance",
+        "tags": ["Account"],
+        "summary": "Read the caller's current USD balance as a one-shot JSON snapshot.",
+        "description": "Returns the current prepaid USD balance for the caller's account as `{ \"balance_usd_micros\": \"<decimal string of micro-cents>\" }`. The value is a string (never a JSON number) so the bigint survives JSON without precision loss; an account with no ledger activity yet reads `\"0\"`. This is the one-shot complement to `GET /api/v1/account/balance/events` (which streams the same field live over SSE). Scope required: account:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — current balance returned.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBalanceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          }
+        }
+      }
+    },
+    "/account/ledger": {
+      "get": {
+        "operationId": "account.listLedger",
+        "tags": ["Account"],
+        "summary": "List the caller's balance-ledger history, newest first.",
+        "description": "The caller's own balance-ledger journal: every debit (publish, storage upload), credit (top-up adjustment, grant, refund), and reservation entry that moved the account's USD balance, newest first. Strictly account-scoped — a credential only ever sees its own account's entries. `amount_usd_micros` is a SIGNED decimal string (negative debit, positive credit; a string, never a JSON number, so the bigint survives JSON without precision loss). `kind` is the registered ledger kind (`poe_publish`, `storage_upload`, `storage_hold`, `storage_hold_release`, `refund_rollback`, `refund_user`, `manual_adjustment`, plus any vendor-registered kinds); `ref` is the entry's cross-reference key (the poe record id for a publish debit or refund, the upload attempt id for a storage charge, the vendor's idempotency key for an adjustment). Pagination uses an opaque base64url keyset cursor — callers must NOT crack it open. Scope required: account:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — ledger page returned.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLedgerList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidCursorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/errors": {
+      "get": {
+        "operationId": "meta.errors",
+        "tags": ["Meta"],
+        "summary": "Dereferenceable error-code reference. Every RFC 7807 `type` URL resolves here.",
+        "description": "Returns the canonical description of every error code the API can emit. Content-negotiated via the `Accept` header: `text/html` renders a per-code anchored reference page (the same target as the `type` URLs in problem responses); any other Accept (including `application/json`) returns the Stripe-style `{ object: \"list\", data: [...] }` envelope. Each entry carries `code`, `title`, `http_status`, `description`, `remediation`, and `ref_url` (the `${type}` URL itself, for round-tripping). Public — no auth gate. Generated from the in-process ERROR_REGISTRY so the registered codes always match the emitted codes.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — error reference returned (HTML or JSON depending on Accept).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ErrorReferenceEntry"
+                      }
+                    }
+                  }
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "meta.docs",
+        "tags": ["Meta"],
+        "summary": "Interactive Scalar API Reference for this OpenAPI document.",
+        "description": "Static HTML page that renders `/api/v1/openapi.json` with the Scalar API Reference. The renderer bundle is served by this gateway at `/api/v1/docs/scalar.js` (never a third-party CDN), so the page works fully offline. Public — no auth gate. Served `noindex,nofollow` (an X-Robots-Tag header plus a robots meta tag) so search engines do not index the rendered HTML as a separate canonical surface.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — Scalar API Reference HTML rendered.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/scalar.js": {
+      "get": {
+        "operationId": "meta.docsScalarJs",
+        "tags": ["Meta"],
+        "summary": "Vendored Scalar API Reference renderer bundle.",
+        "description": "The JavaScript bundle the `/api/v1/docs` page loads, served from this gateway so the docs UI never reaches a third-party CDN. Public — no auth gate. Long-lived caching; the bytes change only when the gateway binary is rebuilt against a new bundle.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — renderer bundle returned.",
+            "content": {
+              "text/javascript": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "meta.openapi",
+        "tags": ["Meta"],
+        "summary": "Machine-readable OpenAPI 3.1 document for this gateway API.",
+        "description": "Static JSON document describing every /api/v1/* operation. Source of truth for SDK code generation and the Scalar API Reference viewer at /api/v1/docs. Public — no auth gate.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — OpenAPI 3.1 document returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "meta.health",
+        "tags": ["Meta"],
+        "summary": "Liveness + readiness probe.",
+        "description": "Returns 200 with `status: \"ok\"` when the database is reachable and the Cardano tip is fresh (observed within 10 minutes). Returns 503 with `status: \"degraded\"` when either dependency is unhealthy — load balancers / uptime checks should treat 503 as \"do not serve\". Public — no auth gate. Cross-origin requests are allowed (anonymous public read).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "200 — service healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503 — service degraded (db unreachable or Cardano tip stale > 10 minutes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "operationId": "webhooks.create",
+        "tags": ["Webhooks"],
+        "summary": "Register an account-scoped webhook subscription.",
+        "description": "Registers a delivery target for the account's subject events. The URL is validated through the SSRF guard. A signing secret is minted and returned exactly once in the response; it is encrypted at rest and never returned again (later reads carry only its fingerprint). A subscription receives exactly the events fanned out after it is created; there is no backfill of earlier events. Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "201 — subscription registered; the signing secret is returned once.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreatedEndpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidBodyResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/WebhookValidationResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      },
+      "get": {
+        "operationId": "webhooks.list",
+        "tags": ["Webhooks"],
+        "summary": "List the account's webhook subscriptions.",
+        "description": "Returns every non-deleted subscription owned by the account, newest first, each carrying its secret fingerprint (never the secret) and failure counters. Scope required: webhooks:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the account's subscriptions.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The subscription id."
+        }
+      ],
+      "get": {
+        "operationId": "webhooks.get",
+        "tags": ["Webhooks"],
+        "summary": "Read one webhook subscription.",
+        "description": "Returns the subscription owned by the account. A subscription owned by another account, soft-deleted, or absent returns 404 identically. Scope required: webhooks:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the subscription.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "webhooks.patch",
+        "tags": ["Webhooks"],
+        "summary": "Update a webhook subscription.",
+        "description": "Updates the subscription owned by the account. Move status between active and paused (re-activating resets the auto-disable counter), replace the URL (re-validated through the SSRF guard) or the event filter, and set or clear the label. Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — the updated subscription.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidBodyResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/WebhookValidationResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "webhooks.delete",
+        "tags": ["Webhooks"],
+        "summary": "Delete a webhook subscription.",
+        "description": "Soft-deletes the subscription owned by the account; it stops matching fan-out immediately. Returns 204 on a delete that took effect, 404 if no such row exists for the account (including an already-deleted one). Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "204 — the subscription was deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The subscription id."
+        }
+      ],
+      "get": {
+        "operationId": "webhooks.deliveries.list",
+        "tags": ["Webhooks"],
+        "summary": "List a subscription's deliveries (the dead-letter view).",
+        "description": "Returns the subscription's deliveries newest first, in every state (pending, delivered, failed). A failed delivery is the dead-letter: it exhausted its attempts and was skipped, leaving a visible seq gap the receiver can detect and the operator can redrive. The endpoint is the ownership gate: a subscription owned by another account, soft-deleted, or absent returns 404 identically. Scope required: webhooks:read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "The page size, clamped to [1, 200]."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the subscription's deliveries, newest first.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries/{delivery_id}/retry": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The subscription id."
+        },
+        {
+          "name": "delivery_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The delivery id to redrive."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.deliveries.retry",
+        "tags": ["Webhooks"],
+        "summary": "Redrive a failed delivery.",
+        "description": "Re-arms a failed (dead-letter) delivery: state returns to pending and it becomes immediately due, while attempts is left intact so the prior failures stand in the audit trail and the redelivery reuses the same Webhook-Id and body. A delivery that is not under an owned endpoint is 404; one that exists but is not failed (still pending or already delivered) is 422. Re-enabling a disabled endpoint (PATCH to active) is a separate step if the endpoint was auto-disabled. Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the delivery was re-armed to pending.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookRedriveResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/WebhookValidationResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/rotate-secret": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The subscription id."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.rotateSecret",
+        "tags": ["Webhooks"],
+        "summary": "Open a signing-secret rotation window.",
+        "description": "Mints a successor signing secret and returns its plaintext exactly once (like create). While the window is open, deliveries are dual-signed (one v1 per active secret), so a receiver validates with either the current or the successor secret. Commit the rotation once your fleet has deployed the successor. Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the rotation window is open; the successor secret is returned once.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretRotation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/rotate-secret/commit": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "The subscription id."
+        }
+      ],
+      "post": {
+        "operationId": "webhooks.rotateSecret.commit",
+        "tags": ["Webhooks"],
+        "summary": "Commit a signing-secret rotation.",
+        "description": "Promotes the successor secret to primary and closes the rotation window, so deliveries drop back to a single v1. Commit is explicit (never automatic) so a multi-instance receiver is not cut over before its fleet is ready. A commit with no open window returns 404. Scope required: webhooks:write.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the rotation is committed; the subscription now signs with the promoted secret.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/WebhooksDisabledResponse"
+          }
+        }
+      }
+    },
+    "/poe/uploads/sessions": {
+      "post": {
+        "operationId": "poe.uploads.sessions.create",
+        "tags": ["PoE"],
+        "summary": "Create a resumable upload session for a file too large for a single request.",
+        "description": "Declare the whole-file `sha256` and `total_bytes` up front. The server returns the authoritative `chunk_bytes` (the client's request clamped to `max_chunk_bytes`) and the chunk grid, and creates one durable assembling file. Two no-bytes-flowing short-circuits at create preserve the single-shot billing invariants: if the content is already stored for this account the response is 200 with `deduplicated: true` and the existing `ar://` URI and NO session is created; if an entitled account cannot fund the chargeable bytes the response is 402 (`insufficient-storage-credit` / `insufficient-funds` / `no-funding-grant`) with NO session created. The single-shot POST /api/v1/poe/uploads stays byte-stable; this session sub-resource is purely additive. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoeUploadSessionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — a dedup hit: the content is already stored, returned without creating a session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadSessionDedup"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "201 — the session was created; PUT each chunk then POST /complete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadSessionCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/UploadsBadRequestResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "402": {
+            "$ref": "#/components/responses/StorageFundingRefusedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/EnvelopeTooLargeResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/WebhookValidationResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/SessionTooManyResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/poe/uploads/sessions/{sid}": {
+      "get": {
+        "operationId": "poe.uploads.sessions.status",
+        "tags": ["PoE"],
+        "summary": "Read a session's resume contract: which chunks are received and which are missing.",
+        "description": "Returns the session state, the chunk grid, and the `received`/`missing` index sets. A reconnecting client reads `missing` and re-sends only those chunks. A session the caller does not own returns 404 indistinguishably from a non-existent one. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The session id from create."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the session's current resume state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "poe.uploads.sessions.abandon",
+        "tags": ["PoE"],
+        "summary": "Abandon a session and reclaim its assembling file.",
+        "description": "Deletes a pre-completion session and its assembling file. The abandoned-session janitor also reclaims sessions that pass their time-to-live, so calling this is an optimisation, not a requirement. A session the caller does not own returns 404. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The session id from create."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "204 — the session was abandoned."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/poe/uploads/sessions/{sid}/chunks/{index}": {
+      "put": {
+        "operationId": "poe.uploads.sessions.chunk",
+        "tags": ["PoE"],
+        "summary": "Send one chunk of a resumable upload.",
+        "description": "The raw chunk bytes are sent as an `application/octet-stream` body (NOT multipart) at the chunk's deterministic offset. `Content-Length` is required and must equal the implied range length `[index*chunk_bytes, min((index+1)*chunk_bytes, total_bytes))`. A `Digest: sha-256=<base64>` header (RFC 9530) is required and verified at ingress. Chunks may arrive in any order and in parallel. A re-sent chunk whose digest matches is an idempotent 200; one whose digest differs is 409 `chunk-conflict`. A Content-Length over the per-chunk ceiling is 413 before the body is read. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The session id from create."
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "The chunk index, 0..chunk_count."
+          },
+          {
+            "name": "Digest",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "RFC 9530 per-chunk integrity digest, e.g. `sha-256=<base64>`."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200 — the chunk was received (or an idempotent re-send of an already-received chunk).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadSessionChunkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SessionChunkBadRequestResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/SessionConflictResponse"
+          },
+          "410": {
+            "$ref": "#/components/responses/SessionGoneResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/EnvelopeTooLargeResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/WebhookValidationResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    },
+    "/poe/uploads/sessions/{sid}/complete": {
+      "post": {
+        "operationId": "poe.uploads.sessions.complete",
+        "tags": ["PoE"],
+        "summary": "Finalise a resumable upload: assemble, verify, and store.",
+        "description": "Requires every chunk received (else 409 `incomplete-upload` with the `missing` indices). The assembled file's whole-file SHA-256 is verified against the declared `sha256` (else 400 `sha256-mismatch`, the session is failed and its file deleted, with no attempt and no charge), then the file is handed into the same storage pipeline a single-shot upload uses: deduped once, the free window netted once over the assembled bytes, and billed exactly once. The response mirrors the single-shot per-file disposition (`ok` with the `ar://` URI when it commits inline, or `accepted` with an `attempt_id` to poll). An `Idempotency-Key` header makes the completion replayable; a re-complete of a completed session returns the recorded outcome. Scope required: poe:create.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The session id from create."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200 — the completion outcome (committed/deduped `ok`, or `accepted` to poll).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoeUploadSessionCompleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SessionSha256MismatchResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedResponse"
+          },
+          "402": {
+            "$ref": "#/components/responses/StorageFundingRefusedResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/SessionConflictResponse"
+          },
+          "410": {
+            "$ref": "#/components/responses/SessionGoneResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableResponse"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque",
+        "description": "API key authentication. Pass the operator-issued API key in the Authorization: Bearer header. The key's human-readable prefix and which deployment (network) it is scoped to are operator-configured."
+      }
+    },
+    "schemas": {
+      "PoePublishResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^poe_[0-9a-hjkmnp-tv-z]{26}$"
+          },
+          "tx_hash": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["submitting", "submitted", "confirmed", "permanent_failure"]
+          },
+          "items_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "signed": {
+            "type": "boolean"
+          },
+          "sealed": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "item_idx": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "hashes": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]+$"
+                  }
+                },
+                "uris": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "enc": {
+                  "type": "object",
+                  "properties": {
+                    "scheme": {
+                      "type": "integer"
+                    },
+                    "aead": {
+                      "type": "string"
+                    },
+                    "kem": {
+                      "type": "string"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]+$"
+                    },
+                    "slots_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "slots_mac": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]+$"
+                    },
+                    "passphrase": {
+                      "type": "object",
+                      "properties": {
+                        "alg": {
+                          "type": "string"
+                        },
+                        "salt": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]+$"
+                        },
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": ["alg", "salt", "params"]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": ["item_idx", "hashes"],
+              "additionalProperties": false
+            }
+          },
+          "conformance_profile": {
+            "type": "string",
+            "enum": ["core", "signed", "sealed", "recipient-sealed"]
+          },
+          "balance_after_usd_micros": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          }
+        },
+        "required": [
+          "id",
+          "tx_hash",
+          "status",
+          "items_count",
+          "signed",
+          "sealed",
+          "items",
+          "conformance_profile",
+          "balance_after_usd_micros"
+        ],
+        "additionalProperties": false
+      },
+      "RecordResource": {
+        "type": "object",
+        "properties": {
+          "tx_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "status": {
+            "type": ["string", "null"],
+            "enum": ["submitting", "confirming", "confirmed", "failed", null],
+            "description": "Lifecycle status of the record. Chain-derived for everyone on anchored rows: 'confirmed' once the configured confirmation-depth threshold is reached, 'confirming' otherwise. Owner-only window for un-anchored rows: 'submitting' while the submit flow is in progress, 'failed' if it permanently failed. Anonymous and cross-account callers never see un-anchored rows, so on the public wire this is always 'confirming' or 'confirmed'."
+          },
+          "block_height": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "block_time": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "num_confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scheme": {
+            "anyOf": [
+              {
+                "type": "number",
+                "enum": [0]
+              },
+              {
+                "type": "number",
+                "enum": [1]
+              },
+              {
+                "type": "number",
+                "enum": [2]
+              }
+            ]
+          },
+          "item_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "signer_ed25519": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]+$"
+          },
+          "metadata_cbor_base64": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string",
+            "pattern": "^acct_[0-9a-hjkmnp-tv-z]{26}$"
+          }
+        },
+        "required": [
+          "tx_hash",
+          "status",
+          "block_height",
+          "block_time",
+          "num_confirmations",
+          "scheme",
+          "item_count",
+          "signer_ed25519",
+          "metadata_cbor_base64"
+        ],
+        "additionalProperties": false
+      },
+      "AccountBalanceResponse": {
+        "type": "object",
+        "properties": {
+          "balance_usd_micros": {
+            "type": "string",
+            "description": "The account's current USD balance in micro-cents, as a decimal string. A string (never a JSON number) so the bigint value survives without precision loss."
+          }
+        },
+        "required": ["balance_usd_micros"],
+        "additionalProperties": false
+      },
+      "AccountLedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ledger row id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The registered ledger kind of the entry (e.g. poe_publish, storage_upload, refund_rollback, refund_user, manual_adjustment, or a vendor-registered kind)."
+          },
+          "amount_usd_micros": {
+            "type": "string",
+            "description": "Signed micro-USD delta as a decimal string: a debit is negative, a credit positive. A string (never a JSON number) so the bigint value survives without precision loss."
+          },
+          "ref": {
+            "type": ["string", "null"],
+            "description": "The entry's cross-reference / idempotency key: the poe record id for a publish debit or refund, the upload attempt id for a storage charge, the vendor's own key for an adjustment. Null for entries with no natural key."
+          },
+          "quote_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The quote a publish debit consumed, stamped for audit. Null for non-publish entries."
+          },
+          "network_usd_micros": {
+            "type": ["string", "null"],
+            "description": "The Cardano network-fee component of a publish debit, in micro-USD as a decimal string, from the consumed quote. Together with service_usd_micros it sums to the publish debit amount. Null for non-publish entries (no quote to decompose)."
+          },
+          "service_usd_micros": {
+            "type": ["string", "null"],
+            "description": "The service-fee (margin) component of a publish debit, in micro-USD as a decimal string, from the consumed quote. The margin is carried on the publish line (storage is billed at raw cost on its own line) so a storage-only upload can be refunded independently. Null for non-publish entries."
+          },
+          "margin_pct": {
+            "type": ["number", "null"],
+            "description": "The markup the publish was priced at, as a fraction (e.g. 0.25 for 25%), from the consumed quote. Null for non-publish entries."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Opaque structured context stamped at insert (e.g. an adjustment's reason, a storage charge's chargeable bytes). Never interpreted by the engine."
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the entry was journalled (RFC 3339, UTC)."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "amount_usd_micros",
+          "ref",
+          "quote_id",
+          "network_usd_micros",
+          "service_usd_micros",
+          "margin_pct",
+          "metadata",
+          "occurred_at"
+        ],
+        "additionalProperties": false
+      },
+      "AccountLedgerList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["list"]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountLedgerEntry"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": ["string", "null"]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": ["object", "data", "has_more", "next_cursor", "url"],
+        "additionalProperties": false
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": ["field", "code", "detail"],
+              "additionalProperties": false
+            }
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "title", "status", "detail", "code", "trace_id"],
+        "additionalProperties": {}
+      },
+      "PoeQuoteRequest": {
+        "type": "object",
+        "properties": {
+          "record_bytes": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "recipient_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_bytes_total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["record_bytes", "recipient_count", "file_bytes_total"],
+        "additionalProperties": false
+      },
+      "PoeUploadsResponse": {
+        "type": "object",
+        "properties": {
+          "uploads": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "idx": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]+$"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "charged_usd_micros": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "The storage USD (micro-USD) ACTUALLY debited for this file, not the reserve-time estimate. Present on a billed or free-window upload (0 for free, 0 when the bytes were already stored for this account on this backend and the upload deduped to no new charge); absent on the pre-upload dedup fast path where the prior receipt is returned unchanged."
+                    }
+                  },
+                  "required": ["idx", "ok", "uri", "sha256", "bytes"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "description": "The bytes are already in flight under a concurrent upload of the same content; this request attached to that attempt rather than starting a second one. Poll GET /api/v1/poe/uploads/attempts/{attempt_id} for the terminal outcome.",
+                  "properties": {
+                    "idx": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "accepted": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "attempt_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": ["idx", "accepted", "attempt_id"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "idx": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [false]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "detail"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["idx", "ok", "error"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": ["uploads"],
+        "additionalProperties": false
+      },
+      "PoeUploadAttempt": {
+        "type": "object",
+        "description": "The current state of an upload attempt, the authoritative terminal-outcome read. `reserved` is in flight; `committed` is the terminal success (carries `uri` and `charged_usd_micros`); `released` is the terminal failure (carries a `reason`).",
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["reserved", "committed", "released"]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]+$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "backend": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string",
+            "description": "The addressable content URI. Present only on a `committed` attempt."
+          },
+          "charged_usd_micros": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The storage USD (micro-USD) ACTUALLY debited for this attempt, not the reserve-time estimate: 0 when the upload committed but deduped against bytes already stored for this account on this backend. Present only on a `committed` attempt."
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["provider_rejected", "unrecoverable_staged_content_lost"],
+            "description": "Why the attempt failed. Present only on a `released` attempt: `provider_rejected` (the provider refused the upload; retry) or `unrecoverable_staged_content_lost` (the bytes did not survive a crash and the provider never received them; re-upload the content)."
+          }
+        },
+        "required": ["attempt_id", "state", "sha256", "bytes", "backend"],
+        "additionalProperties": false
+      },
+      "RecordsList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["list"]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordResource"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": ["string", "null"]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": ["object", "data", "has_more", "next_cursor", "url"],
+        "additionalProperties": false
+      },
+      "RecordsCount": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["count"]
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "The exact number of anchored records matching the filter."
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": ["object", "count", "url"],
+        "additionalProperties": false
+      },
+      "PoePublishRequest": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "string",
+            "pattern": "^[0-9a-f]+$"
+          },
+          "quote_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "signatures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cose_sign1": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "cose_key": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                }
+              },
+              "required": ["cose_sign1"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["record", "quote_id"],
+        "additionalProperties": false
+      },
+      "PoeQuoteResponse": {
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "usd_micros": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "breakdown": {
+            "type": "object",
+            "properties": {
+              "network_usd_micros": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
+              },
+              "storage_usd_micros": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
+              },
+              "service_usd_micros": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
+              }
+            },
+            "required": ["network_usd_micros", "storage_usd_micros", "service_usd_micros"],
+            "additionalProperties": false
+          },
+          "margin_pct": {
+            "type": "number"
+          },
+          "margin_source": {
+            "type": "string",
+            "description": "The attribution of the applied margin: 'account-override' when a per-account override priced the quote, else 'operator-default'."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fx_age_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "The locked total as a decimal string of USD micro-cents (the SDK promotes it to an arbitrary-precision integer at the application boundary)."
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 currency the amount is denominated in.",
+            "example": "USD"
+          }
+        },
+        "required": [
+          "quote_id",
+          "amount",
+          "currency",
+          "usd_micros",
+          "breakdown",
+          "margin_pct",
+          "expires_at",
+          "fx_age_seconds"
+        ],
+        "additionalProperties": false
+      },
+      "PoeUploadsMultipartRequest": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": ["arweave"],
+            "description": "Storage backend target. Optional: absent or `arweave` is accepted; any other value is rejected `400 unsupported-storage-target`. The enum will widen as new backends are added. One call uploads all files to the same backend."
+          },
+          "file_0": {
+            "type": "string",
+            "description": "First binary file to upload. REQUIRED. Additional files sent as `file_1`, `file_2`, ..., `file_31` (cap of 32 per call). Each file is uploaded independently — per-file failures land in `uploads[]` as `{ok: false, error: ...}` entries and do NOT roll back successful siblings."
+          }
+        },
+        "required": ["file_0"],
+        "additionalProperties": false
+      },
+      "PoePublishBatchRequest": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "record": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "quote_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "signatures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "cose_sign1": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]+$"
+                      },
+                      "cose_key": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]+$"
+                      }
+                    },
+                    "required": ["cose_sign1"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["record", "quote_id"],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50
+          }
+        },
+        "required": ["records"],
+        "additionalProperties": false
+      },
+      "ErrorReferenceEntry": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "http_status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "description": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "ref_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": ["code", "title", "http_status", "description", "remediation", "ref_url"],
+        "additionalProperties": false,
+        "description": "One entry in the /api/v1/errors registry — describes a single error code, its default HTTP status, when it fires, and the recommended remediation. `ref_url` is the dereferenceable `type` URL the same code carries on the wire."
+      },
+      "PoePublishBatchResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "record_idx": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^poe_[0-9a-hjkmnp-tv-z]{26}$"
+                    },
+                    "tx_hash": {
+                      "type": ["string", "null"],
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["submitting", "submitted", "confirmed", "permanent_failure"]
+                    },
+                    "items_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "signed": {
+                      "type": "boolean"
+                    },
+                    "sealed": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_idx": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "hashes": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]+$"
+                            }
+                          },
+                          "uris": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "enc": {
+                            "type": "object",
+                            "properties": {
+                              "scheme": {
+                                "type": "integer"
+                              },
+                              "aead": {
+                                "type": "string"
+                              },
+                              "kem": {
+                                "type": "string"
+                              },
+                              "nonce": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]+$"
+                              },
+                              "slots_count": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "slots_mac": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]+$"
+                              },
+                              "passphrase": {
+                                "type": "object",
+                                "properties": {
+                                  "alg": {
+                                    "type": "string"
+                                  },
+                                  "salt": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]+$"
+                                  },
+                                  "params": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": ["alg", "salt", "params"]
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["item_idx", "hashes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "conformance_profile": {
+                      "type": "string",
+                      "enum": ["core", "signed", "sealed", "recipient-sealed"]
+                    }
+                  },
+                  "required": [
+                    "record_idx",
+                    "id",
+                    "tx_hash",
+                    "status",
+                    "items_count",
+                    "signed",
+                    "sealed",
+                    "items",
+                    "conformance_profile"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "record_idx": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "field": {
+                                "type": "string"
+                              },
+                              "code": {
+                                "type": "string"
+                              },
+                              "detail": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["field", "code", "detail"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "extensions": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": ["code", "detail"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["record_idx", "error"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "balance_after_usd_micros": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          }
+        },
+        "required": ["results", "balance_after_usd_micros"],
+        "additionalProperties": false
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok", "degraded"]
+          },
+          "version": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string",
+            "enum": ["mainnet", "preprod", "preview"]
+          },
+          "cardano_tip_height": {
+            "type": ["integer", "null"]
+          },
+          "cardano_tip_age_seconds": {
+            "type": ["integer", "null"]
+          },
+          "db_ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "network",
+          "cardano_tip_height",
+          "cardano_tip_age_seconds",
+          "db_ok"
+        ]
+      },
+      "WebhookCreateRequest": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The HTTPS delivery target. Validated through the SSRF guard at registration: HTTPS-only by default, and rejected if it resolves to a blocked IP range (private, loopback, link-local, or a cloud metadata address)."
+          },
+          "enabled_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The wire event names to deliver. Omitted or empty means every wire event type. Each value must be a published wire event name (poe_status_changed, cardano_submission_failed, balance_changed, storage_upload_failed, poe_refund_intent, storage_refund_intent)."
+          },
+          "label": {
+            "type": "string",
+            "description": "An optional human label for the subscription."
+          }
+        }
+      },
+      "WebhookPatchRequest": {
+        "type": "object",
+        "description": "Every field is optional; an absent field is left untouched. Set the label to null to clear it.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused"],
+            "description": "Move between active and paused. Re-activating resets the auto-disable failure counter. The disabled status is server-only and cannot be set here."
+          },
+          "enabled_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replace the wire event filter. Empty means every wire event type."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Replace the delivery URL. Re-validated through the SSRF guard."
+          },
+          "label": {
+            "type": ["string", "null"],
+            "description": "Set or clear the label. A null clears it."
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "description": "The metadata view of a subscription. Carries the secret fingerprint, never the secret itself (the plaintext is shown exactly once at create/rotate).",
+        "required": [
+          "id",
+          "url",
+          "enabled_events",
+          "status",
+          "secret_fp",
+          "consecutive_failures",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "enabled_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "disabled"]
+          },
+          "disabled_reason": {
+            "type": ["string", "null"],
+            "description": "Why the server auto-disabled the endpoint, when it did."
+          },
+          "secret_fp": {
+            "type": "string",
+            "description": "Hex SHA-256 fingerprint of the active signing secret."
+          },
+          "secret_next_fp": {
+            "type": "string",
+            "description": "Hex fingerprint of the rotation-window secret, present only while a rotation is open."
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "description": "Consecutive fully-exhausted deliveries; the auto-disable accumulator."
+          },
+          "dead_deliveries": {
+            "type": "integer",
+            "description": "Count of failed (dead-letter) deliveries for this endpoint, surfaced inline so a growing failure population is visible without a separate deliveries-list call."
+          },
+          "last_success_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "label": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookCreatedEndpoint": {
+        "type": "object",
+        "description": "The create response: the new subscription plus its signing secret, returned exactly once. The secret is never retrievable again; later reads carry only its fingerprint.",
+        "required": ["id", "url", "enabled_events", "status", "created_at", "secret"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "enabled_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active"]
+          },
+          "label": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "secret": {
+            "type": "string",
+            "description": "The plaintext signing secret, shown exactly once. Store it now; it is never returned again."
+          }
+        }
+      },
+      "WebhookList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEndpoint"
+            }
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "description": "One delivery's state. A failed delivery is the dead-letter (it exhausted its attempts and was skipped). The frozen body is not returned: it is what the receiver got, and it is large.",
+        "required": [
+          "id",
+          "webhook_id",
+          "subject_kind",
+          "subject_id",
+          "subject_seq",
+          "event_type",
+          "state",
+          "attempts",
+          "max_attempts",
+          "next_attempt_at",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The delivery id (the redrive target)."
+          },
+          "webhook_id": {
+            "type": "string",
+            "description": "The per-delivery Webhook-Id the receiver dedupes on (kind:id:seq:endpoint_id)."
+          },
+          "subject_kind": {
+            "type": "string"
+          },
+          "subject_id": {
+            "type": "string"
+          },
+          "subject_seq": {
+            "type": "integer",
+            "description": "The per-subject sequence; a gap in the delivered run marks an exhausted, skipped event."
+          },
+          "event_type": {
+            "type": "string",
+            "description": "The internal event type (projected to a public wire name on delivery)."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["pending", "delivered", "failed"]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "max_attempts": {
+            "type": "integer"
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "last_status": {
+            "type": ["integer", "null"],
+            "description": "The last HTTP status seen, or null for a transport error with no status."
+          },
+          "last_error": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the delivery was fanned out."
+          }
+        }
+      },
+      "WebhookDeliveryList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          }
+        }
+      },
+      "WebhookRedriveResult": {
+        "type": "object",
+        "required": ["id", "state"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The redriven delivery id."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["pending"],
+            "description": "The delivery is re-armed to pending."
+          }
+        }
+      },
+      "WebhookSecretRotation": {
+        "type": "object",
+        "description": "The rotate-secret response: the successor signing secret shown exactly once plus both active fingerprints (the rotation window is now open).",
+        "required": ["id", "secret_fp", "secret_next_fp", "secret_next"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "secret_fp": {
+            "type": "string",
+            "description": "Hex fingerprint of the current (primary) secret, unchanged by the rotation."
+          },
+          "secret_next_fp": {
+            "type": "string",
+            "description": "Hex fingerprint of the successor secret."
+          },
+          "secret_next": {
+            "type": "string",
+            "description": "The plaintext successor signing secret, shown exactly once. Store it now; it is never returned again."
+          }
+        }
+      },
+      "PoeUploadSessionCreateRequest": {
+        "type": "object",
+        "description": "Declare a resumable upload: the whole-file digest and size are declared up front so the server can dedup and check affordability before any bytes flow.",
+        "required": ["sha256", "total_bytes"],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "The storage target; absent or `arweave`. Any other value is rejected `400 unsupported-storage-target`."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The declared whole-file content digest, 64 lowercase hex characters. It is the dedup/affordability key and the integrity target the assembled file is verified against at completion."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The declared total file size in bytes. Bounded only by the per-file size ceiling."
+          },
+          "chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The client's intended chunk size. The server clamps it to its per-chunk ceiling and returns the authoritative value it will enforce; the size is fixed for the session lifetime."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "The content type recorded for the data-item Content-Type tag. Defaults to application/octet-stream."
+          }
+        }
+      },
+      "PoeUploadSession": {
+        "type": "object",
+        "description": "A resumable upload session: the resume contract. `received`/`missing` partition the chunk indices; a reconnecting client re-sends only the missing ones.",
+        "required": [
+          "session_id",
+          "state",
+          "sha256",
+          "total_bytes",
+          "chunk_bytes",
+          "chunk_count",
+          "received",
+          "missing",
+          "expires_at"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["open", "assembling", "completed", "failed", "expired"],
+            "description": "The session lifecycle state."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The declared whole-file content digest, 64 lowercase hex."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The authoritative, server-enforced chunk size."
+          },
+          "chunk_count": {
+            "type": "integer",
+            "description": "The number of chunks: ceil(total_bytes / chunk_bytes)."
+          },
+          "received": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "The chunk indices the server holds."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "The chunk indices still to send (the resume set)."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attempt_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Set once completion reserves the upload attempt; the bridge to GET /api/v1/poe/uploads/attempts/{attempt_id}."
+          },
+          "uri": {
+            "type": ["string", "null"],
+            "description": "Set on terminal success: the ar:// URI the content resolved to."
+          }
+        }
+      },
+      "PoeUploadSessionCreated": {
+        "type": "object",
+        "description": "The session-create result. A dedup hit instead returns 200 with `deduplicated: true` and the existing URI (no session is created).",
+        "required": [
+          "session_id",
+          "chunk_bytes",
+          "chunk_count",
+          "received",
+          "expires_at",
+          "max_chunk_bytes"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The authoritative chunk size the server will accept (the client's request, clamped to the ceiling)."
+          },
+          "chunk_count": {
+            "type": "integer"
+          },
+          "received": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Empty on create."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "max_chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The server's per-chunk ceiling, so the client can adapt without a release."
+          }
+        }
+      },
+      "PoeUploadSessionDedup": {
+        "type": "object",
+        "description": "A session-create dedup hit: the content is already stored for this account, so no session is created and no bytes flow.",
+        "required": ["deduplicated", "uri", "sha256", "bytes", "charged_usd_micros"],
+        "properties": {
+          "deduplicated": {
+            "type": "boolean",
+            "enum": [true]
+          },
+          "uri": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "charged_usd_micros": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [0]
+          }
+        }
+      },
+      "PoeUploadSessionChunkResponse": {
+        "type": "object",
+        "description": "The result of receiving one chunk.",
+        "required": ["index", "received", "remaining", "complete"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "The index just received."
+          },
+          "received": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "remaining": {
+            "type": "integer",
+            "description": "How many chunk indices are still missing."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Whether every chunk has now been received."
+          }
+        }
+      },
+      "PoeUploadSessionCompleteResponse": {
+        "description": "The completion outcome, mirroring a single-shot per-file disposition: a committed (or deduped) `ok` result, or an `accepted` result whose bytes are in flight under a concurrent attempt (poll GET /api/v1/poe/uploads/attempts/{attempt_id}).",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["ok", "uri", "sha256", "bytes"],
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [true]
+              },
+              "uri": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "charged_usd_micros": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The storage USD applied (0 on a free-window or deduped completion)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["accepted", "attempt_id"],
+            "properties": {
+              "accepted": {
+                "type": "boolean",
+                "enum": [true]
+              },
+              "attempt_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "responses": {
+      "InvalidBodyResponse": {
+        "description": "400 — invalid-body",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#invalid-body",
+              "title": "Invalid Body",
+              "status": 400,
+              "detail": "Request body is not valid JSON.",
+              "code": "invalid-body",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InvalidPoeIdResponse": {
+        "description": "400 — invalid-poe-id",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#invalid-poe-id",
+              "title": "Invalid Poe Id",
+              "status": 400,
+              "detail": "poe id must be a prefixed wire id (poe_<26-char-crockford-base32>).",
+              "code": "invalid-poe-id",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "QuoteNotFoundResponse": {
+        "description": "404 — quote-not-found",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#quote-not-found",
+              "title": "Quote Not Found",
+              "status": 404,
+              "detail": "No publish quote with that id was found for this account.",
+              "code": "quote-not-found",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "NotImplementedResponse": {
+        "description": "501 — not-implemented",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#not-implemented",
+              "title": "Not Implemented",
+              "status": 501,
+              "detail": "Filtering by recipient is not supported — the indexer enforces a zero-knowledge invariant.",
+              "code": "not-implemented",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InvalidQueryResponse": {
+        "description": "422 — validation-failed: a query parameter failed validation (e.g. an out-of-range `scheme`, a `signer` that is not 64 lowercase hex characters, or an inverted block/time window).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#validation-failed",
+              "title": "Validation Failed",
+              "status": 422,
+              "detail": "signer must be 64 lowercase hex characters (a 32-byte Ed25519 key)",
+              "code": "validation-failed",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "ValidationFailedResponse": {
+        "description": "422 — validation-failed: the request body failed validation (non-hex record bytes, a structurally invalid Label 309 record, a malformed quote_id, or a record larger than its quote was priced for).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#validation-failed",
+              "title": "Validation failed",
+              "status": 422,
+              "detail": "record is not a valid Label 309 canonical-CBOR record",
+              "code": "validation-failed",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InvalidCursorResponse": {
+        "description": "400 — invalid-cursor: the pagination cursor could not be decoded. Cursors are opaque; replay `next_cursor` byte-for-byte or restart from the first page.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#invalid-cursor",
+              "title": "Invalid pagination cursor",
+              "status": 400,
+              "detail": "the pagination cursor could not be decoded",
+              "code": "invalid-cursor",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "CountUnboundedResponse": {
+        "description": "422 — validation-failed: the count was not scoped to a signer (supply a signer; scheme, sealed, and block/time windows narrow but do not bound the count), or a filter parameter failed validation (the same grammar as the list route).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#validation-failed",
+              "title": "Validation failed",
+              "status": 422,
+              "detail": "a records count must be scoped to a signer: supply a signer (a count's cost is the size of the matching set, which only a signer bounds; scheme, sealed, and block/time windows narrow but do not bound it)",
+              "code": "validation-failed",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "BatchTooLargeResponse": {
+        "description": "422 — batch-too-large / validation-failed. The `code` field is `batch-too-large` (more than 50 records in one call) or `validation-failed` (an empty `records` array, or a record that fails validation — non-hex bytes, a structurally invalid record, or a record larger than its quote was priced for).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#batch-too-large",
+              "title": "Batch too large",
+              "status": 422,
+              "detail": "a publish-batch carries at most 50 records",
+              "code": "batch-too-large",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "QuoteAlreadyConsumedResponse": {
+        "description": "409 — quote-already-consumed",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#quote-already-consumed",
+              "title": "Quote Already Consumed",
+              "status": 409,
+              "detail": "This publish quote has already been consumed; request a new quote and retry.",
+              "code": "quote-already-consumed",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InsufficientFundsResponse": {
+        "description": "402 — insufficient-funds. The problem body carries the RFC 7807 §3.2 extension members `balance_usd_micros` (the balance at rejection time) and `required_usd_micros` (the charge it could not cover), both decimal strings in micro-USD.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#insufficient-funds",
+              "title": "Insufficient Funds",
+              "status": 402,
+              "detail": "The account does not have enough USD balance to publish the record(s).",
+              "code": "insufficient-funds",
+              "balance_usd_micros": "150000",
+              "required_usd_micros": "410000",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "IdempotencyKeyConflictResponse": {
+        "description": "409 — idempotency-key-conflict",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#idempotency-key-conflict",
+              "title": "Idempotency Key Conflict",
+              "status": 409,
+              "detail": "The Idempotency-Key has been seen before with a different request body.",
+              "code": "idempotency-key-conflict",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "UploadsBadRequestResponse": {
+        "description": "400 — invalid-body / unsupported-storage-target",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#invalid-body",
+              "title": "Invalid request body",
+              "status": 400,
+              "detail": "The upload request was malformed. The `code` field is one of `invalid-body` (the body did not parse — a malformed or truncated multipart/form-data stream, or invalid JSON on the session create) or `unsupported-storage-target` (the `target` field names a backend the deployment does not support; only `arweave` is accepted). More file parts than the per-call maximum of 32, or a file / batch total beyond the byte ceiling, is a 413 `envelope-too-large`.",
+              "code": "invalid-body",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "ServiceUnavailableResponse": {
+        "description": "503 — service-unavailable",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#service-unavailable",
+              "title": "Service unavailable",
+              "status": 503,
+              "detail": "A dependency the request needs (storage, the database) is temporarily unavailable. Retry after a short backoff.",
+              "code": "service-unavailable",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "ForbiddenResponse": {
+        "description": "403 — insufficient-scope. The problem body carries the RFC 7807 §3.2 extension members `required` (string[]: the scope the endpoint requires) and `granted` (string[]: the scopes the credential actually carries — empty for an operator credential presented to the data plane, which grants nothing there).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#insufficient-scope",
+              "title": "Insufficient Scope",
+              "status": 403,
+              "detail": "this endpoint requires the poe:create scope",
+              "code": "insufficient-scope",
+              "required": ["poe:create"],
+              "granted": ["poe:read"],
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "UnauthorizedResponse": {
+        "description": "401 — unauthorized",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#unauthorized",
+              "title": "Unauthorized",
+              "status": 401,
+              "detail": "Authentication is required to access this resource. The `code` field is always `unauthorized`: a missing Authorization header, a malformed Bearer credential, and an unknown or revoked one all collapse to the same response, so a scanner cannot distinguish credential formats from live secrets.",
+              "code": "unauthorized",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "EnvelopeTooLargeResponse": {
+        "description": "413 — envelope-too-large",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#envelope-too-large",
+              "title": "Envelope Too Large",
+              "status": 413,
+              "detail": "A single file, or the cumulative upload batch, crossed the 10 GiB streaming byte ceiling. The parser aborts mid-stream the moment the count is exceeded, so the over-cap bytes are never buffered into the heap.",
+              "code": "envelope-too-large",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InternalErrorResponse": {
+        "description": "500 — internal-error",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#internal-error",
+              "title": "Internal Error",
+              "status": 500,
+              "detail": "An unexpected server error occurred.",
+              "code": "internal-error",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "QuoteExpiredResponse": {
+        "description": "410 — quote-expired",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#quote-expired",
+              "title": "Quote Expired",
+              "status": 410,
+              "detail": "The publish quote has expired; request a new quote and retry.",
+              "code": "quote-expired",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "NotFoundResponse": {
+        "description": "404 — not-found",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#not-found",
+              "title": "Not Found",
+              "status": 404,
+              "detail": "No PoE record is indexed under that transaction hash.",
+              "code": "not-found",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "InvalidTxHashResponse": {
+        "description": "400 — invalid-tx-hash",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#invalid-tx-hash",
+              "title": "Invalid Tx Hash",
+              "status": 400,
+              "detail": "tx_hash must be 64 lowercase hex characters.",
+              "code": "invalid-tx-hash",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "RateLimitedResponse": {
+        "description": "429 — rate-limited",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#rate-limited",
+              "title": "Rate Limited",
+              "status": 429,
+              "detail": "API-key rate limit exceeded.",
+              "code": "rate-limited",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "FxStaleResponse": {
+        "description": "503 — service-unavailable",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#service-unavailable",
+              "title": "Service Unavailable",
+              "status": 503,
+              "detail": "No FX rate snapshot exists; pricing is unavailable. The worker may still be booting; please retry shortly.",
+              "code": "service-unavailable",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "StorageFundingRefusedResponse": {
+        "description": "402 — the storage funding the publish would draw cannot be honoured. The `code` is `no-funding-grant` when no live grant entitles the caller to draw a funding source for the configured backend, or `insufficient-storage-credit` when the drawable source's cached credit is below the safety floor or its provider-reported capacity cannot cover the chargeable bytes.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            },
+            "example": {
+              "type": "https://gateway.example/api/v1/errors#no-funding-grant",
+              "title": "No storage funding grant",
+              "status": 402,
+              "detail": "No storage funding source entitles this account to store content beyond the free window.",
+              "code": "no-funding-grant",
+              "trace_id": "01977c8a-7c5e-7000-8000-000000000000"
+            }
+          }
+        }
+      },
+      "WebhooksDisabledResponse": {
+        "description": "503 — webhook subscriptions are not enabled on this deployment.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "WebhookValidationResponse": {
+        "description": "422 — the delivery URL was rejected by the SSRF guard or the event filter named an unknown wire event type.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionChunkBadRequestResponse": {
+        "description": "400 — the chunk was rejected: `chunk-digest-mismatch` (bytes do not match the declared Digest, or the Digest header is missing/malformed) or `chunk-size-mismatch` (length not equal to the implied range).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionConflictResponse": {
+        "description": "409 — `chunk-conflict` (an index re-sent with a different digest) or `incomplete-upload` (completed before every chunk was received; the `missing` indices are listed).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionGoneResponse": {
+        "description": "410 — `session-expired`: the session passed its time-to-live before completion.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionTooManyResponse": {
+        "description": "429 — `too-many-open-sessions`: the account already has the maximum number of concurrently open sessions.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionSha256MismatchResponse": {
+        "description": "400 — `sha256-mismatch`: the assembled file did not match the sha256 declared at create. The session is failed and its assembling file deleted; no attempt and no charge.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "RateLimit-Reset": {
+        "description": "IETF draft-ietf-httpapi-ratelimit-headers-09. Seconds until the current sliding window rolls over — the earliest moment `RateLimit-Remaining` could fully reset.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "RateLimit-Remaining": {
+        "description": "IETF draft-ietf-httpapi-ratelimit-headers-09. Tokens left in the current sliding window after this request was counted. Zero on a 429 response.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "RateLimit-Limit": {
+        "description": "IETF draft-ietf-httpapi-ratelimit-headers-09. The per-window request ceiling enforced for the API key on this endpoint, in requests per 60 seconds.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

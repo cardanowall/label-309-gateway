@@ -1,0 +1,12 @@
+{
+  "generator_versions": {
+    "@dha-team/arbundles": "1.0.4",
+    "arweave": "1.15.7"
+  },
+  "description": "A tag list whose serialized Avro frame is 4097 bytes (one over MAX_TAG_BYTES). The reference implementation rejects it, so no signed .bin is emitted. serialize_error is thrown by serializeTags() when the frame overflows its fixed MAX_TAG_BYTES buffer; verify_rejects_oversize_tag_bytes records that DataItem.verify() returns false for a binary whose declared tag byte count exceeds MAX_TAG_BYTES.",
+  "max_tag_bytes": 4096,
+  "attempted_avro_len": 4097,
+  "serialize_error_name": "Error",
+  "serialize_error_message": "Too many tag bytes (4097 > 4096)",
+  "verify_rejects_oversize_tag_bytes": true
+}

@@ -1,0 +1,13 @@
+{
+  "name": "gateway-conformance-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Conformance drivers that run the published TypeScript SDK against a running gateway.",
+  "scripts": {
+    "flows": "node sdk-ts-flows.mjs"
+  },
+  "dependencies": {
+    "@cardanowall/sdk-ts": "0.8.0"
+  }
+}

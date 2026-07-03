@@ -1,0 +1,15 @@
+# Rust build output
+/target
+
+# Node dependencies of the in-tree cross-verification tools (installed on demand).
+node_modules/
+
+# Local cargo config overrides
+.cargo/config.toml
+
+# Local scratch and working notes
+/tmp
+
+# Editor / OS
+*.swp
+.DS_Store

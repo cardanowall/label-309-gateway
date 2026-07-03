@@ -1,0 +1,27 @@
+{
+  "name": "change_below_min_ada_add_input",
+  "mode": "standard",
+  "protocol": {
+    "min_fee_a": 44,
+    "min_fee_b": 155381,
+    "coins_per_utxo_byte": 4310,
+    "max_tx_size": 16384
+  },
+  "record_len": 32,
+  "utxos": [
+    {
+      "tx_hash": "581f37a1ebcd4e04f83bc4f5bcd2aed6406dc8abf98abb9f6d5941d635818620",
+      "index": 0,
+      "lovelace": 1000000
+    },
+    {
+      "tx_hash": "50499a48c2b9f782744c9185a4d49078553441f25de28d399ab6c5175d9ce02f",
+      "index": 1,
+      "lovelace": 1000000
+    }
+  ],
+  "validity": null,
+  "expect": "ok",
+  "change_address": "addr_test1vpa8ukd77k05gc3etxeyzylxxmyhzg0hvne9qplxvsyl44q6pl7v4",
+  "network_id": 0
+}

@@ -1,0 +1,78 @@
+{
+  "generator_versions": {
+    "@dha-team/arbundles": "1.0.4",
+    "arweave": "1.15.7"
+  },
+  "hash": "SHA-384",
+  "description": "Known-answer tests for the ANS-104 recursive deep-hash. A blob hashes as H(H('blob'||ascii(len)) || H(blob)); a list of length n folds each child into an accumulator seeded with H('list'||ascii(n)). input_hex is the leaf blob bytes; children are nested deep-hash items. deep_hash_hex is the 48-byte SHA-384 digest.",
+  "kats": [
+    {
+      "name": "empty_blob",
+      "shape": "blob",
+      "input_hex": "",
+      "deep_hash_hex": "fbf00cc444f5fea9dc3bedf62a13fba8ae87e7445fc910567a23bec4eb82fadb1143c433069314d8362983dc3c2e4a38"
+    },
+    {
+      "name": "hello_blob",
+      "shape": "blob",
+      "input_hex": "68656c6c6f",
+      "deep_hash_hex": "33ab2407a6c328c0bc1bbe5971f49af5c1908985f83c3d2bd89a9e221dd8b068dc61ce968ba3f9ab12d5361ba3944382"
+    },
+    {
+      "name": "kib_blob",
+      "shape": "blob",
+      "input_hex": "0d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff06",
+      "deep_hash_hex": "c3847016cbf2e5cd9bc21059330952fcfaa38f5f07104af5433cbd5b38737b9da4aab7620c83eaef662d9e23e792ce4e"
+    },
+    {
+      "name": "empty_list",
+      "shape": "list",
+      "children": [],
+      "deep_hash_hex": "a69e7d37fdc7f040a9ec16aae84de24fab4a653dac4de0bd247e36bab9fe45d9289c5a04a893c95285812f5cefc9707a"
+    },
+    {
+      "name": "ab_list",
+      "shape": "list",
+      "children": [
+        {
+          "shape": "blob",
+          "input_hex": "61"
+        },
+        {
+          "shape": "blob",
+          "input_hex": "62"
+        }
+      ],
+      "deep_hash_hex": "961ca0d6e9a426f29b6e1f3c8d690175ee8b92d162004341430323d3e0350ffc8a6233159d07e4e7ac81f23d67733e51"
+    },
+    {
+      "name": "nested_list",
+      "shape": "list",
+      "children": [
+        {
+          "shape": "list",
+          "children": [
+            {
+              "shape": "blob",
+              "input_hex": "61"
+            }
+          ]
+        },
+        {
+          "shape": "list",
+          "children": [
+            {
+              "shape": "blob",
+              "input_hex": "62"
+            },
+            {
+              "shape": "blob",
+              "input_hex": "63"
+            }
+          ]
+        }
+      ],
+      "deep_hash_hex": "83251b0e5a1b973ad932d9d02f05db500f345537c1300fa46406fffac7bb7ec0bb5b0faf83854807f3ad9db3e8867394"
+    }
+  ]
+}
