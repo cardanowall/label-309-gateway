@@ -67,7 +67,7 @@ pallas-codec = { workspace = true }
 # `Webhook`-purpose egress (`assert_webhook_url_safe` + the DNS-pinning,
 # redirect-refusing, proxy-disabled `ReqwestTransport::pinned`), reusing the SDK's
 # audited SSRF chokepoint rather than building a weaker one here.
-cardanowall = "=0.8.0"
+cardanowall = "=0.11.0"
 # Operator keyring: an age-encrypted JSON envelope (scrypt passphrase recipient)
 # decrypted in process, plus bech32 decode/encode for the wallets' ed25519
 # signing keys and their derived Cardano payment addresses.

@@ -1,6 +1,6 @@
 [package]
 name = "gateway"
-version = "0.1.0"
+version = "0.1.1"
 description = "The gateway application binary: assembles and supervises the Postgres-backed publish/confirm/index/wallet runtime."
 readme = "README.md"
 # The binary is an internal deployment artifact, not a published crate.

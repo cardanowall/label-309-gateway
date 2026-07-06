@@ -7,6 +7,17 @@ the Label 309 SDK and CLI packages.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-06
+
+### Changed
+
+- Adopt the `cardanowall` Label 309 SDK 0.11.0: the exact crates.io pin the
+  public source resolves and the version the conformance suite drives the
+  gateway's wire shape against. Picks up the SDK's multi-hash sealed prepare,
+  passphrase two-phase publish, and `supersedes` / `uris` on the Merkle and
+  content inputs. No gateway API or schema change; the wire shape the gateway
+  produces and indexes is unchanged.
+
 ## [0.1.0] - 2026-07-03
 
 First public release: the open-source backend of a Label 309 Proof-of-Existence

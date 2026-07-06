@@ -17,7 +17,7 @@ homepage.workspace = true
 # contract oracle. A NORMAL registry dependency (not a path dep): the harness
 # must drive the artifact a third party would `cargo add`, so a regression in
 # the gateway's wire shape surfaces as a deserialize failure in the real client.
-cardanowall = "=0.8.0"
+cardanowall = "=0.11.0"
 # The in-repo engine, so the harness can BOOT the gateway under test (build its
 # router over a fresh database, wire the pricing/storage seams a deployment
 # supplies) and seed an operator/account/api-key directly. This is the system
