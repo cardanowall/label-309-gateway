@@ -7,6 +7,22 @@ the Label 309 SDK and CLI packages.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-28
+
+### Changed
+
+- Adopt the `cardanowall` Label 309 SDK 0.12.0: the exact crates.io pin the
+  public source resolves and the version the conformance suite drives the
+  gateway's wire shape against. The SDK's additions in that release (streaming
+  passphrase sealing and opening, the size estimator's explicit envelope
+  shapes) are client-side surfaces the gateway does not call, so nothing in its
+  behaviour, API, or schema changes.
+
+### Security
+
+- `quinn-proto` 0.11.14 → 0.11.16 in the lockfile, closing a denial-of-service
+  advisory in the QUIC transport pulled in through the HTTP client stack.
+
 ## [0.1.1] - 2026-07-06
 
 ### Changed
