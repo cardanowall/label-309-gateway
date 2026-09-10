@@ -7,6 +7,26 @@ the Label 309 SDK and CLI packages.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-10
+
+### Security
+
+- `h2` 0.4.15 → 0.4.19 in the lockfile, closing an unbounded empty-DATA-frame
+  denial of service (RUSTSEC-2026-0258). The crate sits under both the HTTP
+  server that serves the data and control planes and the outbound client the
+  chain and storage backends call, so the fix covers ingress and egress alike.
+- `rust_decimal` 1.42.1 → 1.43.0, which drops the crate's `rkyv` 0.7 feature
+  bridge and with it removes `rkyv` and its sixteen-crate subtree from the
+  lockfile, closing RUSTSEC-2026-0235 (insufficient archive validation causing
+  out-of-bounds reads on archives containing `Rc`/`Arc`). No feature this
+  workspace enables ever activated that bridge, so the advisory was not
+  reachable in a built binary; the bump removes the entry outright rather than
+  leaving it to be argued away at every audit.
+- `event-listener` 5.4.1 → 5.4.2 and `anyhow` 1.0.102 → 1.0.104 take the fixes
+  for two soundness advisories (RUSTSEC-2026-0221, RUSTSEC-2026-0190), and
+  `chacha20`, `der` and `spin` move off yanked releases. `cargo audit` is clean
+  for the workspace.
+
 ## [0.1.2] - 2026-07-28
 
 ### Changed
@@ -78,5 +98,8 @@ and the money, chain, and storage state behind it.
 - **Operations** — a container image, an example single-host Docker Compose
   deployment, and optional error monitoring for any Sentry-compatible backend.
 
-[Unreleased]: https://github.com/cardanowall/label-309-gateway/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cardanowall/label-309-gateway/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/cardanowall/label-309-gateway/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/cardanowall/label-309-gateway/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/cardanowall/label-309-gateway/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cardanowall/label-309-gateway/releases/tag/v0.1.0
