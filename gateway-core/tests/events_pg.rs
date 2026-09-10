@@ -215,6 +215,25 @@ async fn sequence_survives_dropping_the_partition_that_held_earlier_events() {
     let db = TestDb::fresh().await.expect("test database");
     let pool = db.pool.clone();
 
+    // Provision the current month before appending. A migration-only database
+    // carries the baseline's fixed month partitions plus DEFAULT, so outside
+    // those months every row lands in DEFAULT — and this test would then drop
+    // DEFAULT rather than the month partition the retention path actually
+    // targets, which is a different scenario and leaves the table with no
+    // fallback. In a running deployment the create-ahead pass keeps the current
+    // month provisioned; do the same here so the test models retention on any
+    // date.
+    ensure_ahead(
+        &pool,
+        &PartitionedTable::new("cw_core.subject_event", "created_at"),
+        PartitionWindow {
+            create_ahead_months: 0,
+            retain_months: 12,
+        },
+    )
+    .await
+    .expect("provision the current-month partition");
+
     const N: i64 = 5;
     for i in 1..=N {
         let ev = append_subject_event(
@@ -242,6 +261,11 @@ async fn sequence_survives_dropping_the_partition_that_held_earlier_events() {
     assert!(
         !to_drop.is_empty(),
         "the subject's events must live in at least one partition"
+    );
+    assert!(
+        !to_drop.iter().any(|p| p == "cw_core.subject_event_default"),
+        "the events must land in a month partition, not DEFAULT — dropping DEFAULT \
+         models no retention path and removes the table's fallback: {to_drop:?}"
     );
     for partition in &to_drop {
         // The partition name comes from the catalog (`regclass`), not user input.
