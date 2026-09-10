@@ -349,12 +349,27 @@ pub struct Problem {
     pub title: String,
     /// The instance-specific human detail.
     pub detail: String,
+    /// The members only a minority of problems carry. See [`ProblemExtras`].
+    extras: Option<Box<ProblemExtras>>,
+}
+
+/// The members a minority of problems carry: per-field validation errors,
+/// extension members, and a `Retry-After` window.
+///
+/// A `Problem` is the error type of nearly every fallible function in the API
+/// layer, so its width is paid by every `Result` that returns one — on the
+/// success path as much as the failure path. Held inline, these three members
+/// made the envelope 144 bytes; behind a single pointer the common problem is
+/// 88, which is what "cheap to construct and carry" above is meant to mean.
+/// `None` is the overwhelmingly common case and allocates nothing.
+#[derive(Debug, Clone, Default)]
+struct ProblemExtras {
     /// Per-field validation errors, when any.
-    pub errors: Vec<FieldError>,
+    errors: Vec<FieldError>,
     /// Extension members merged into the body (e.g. balance/required on a 402).
-    pub extensions: serde_json::Map<String, Value>,
+    extensions: serde_json::Map<String, Value>,
     /// Seconds a client should wait before retrying (only emitted on 429).
-    pub retry_after_secs: Option<u64>,
+    retry_after_secs: Option<u64>,
 }
 
 impl Problem {
@@ -371,30 +386,33 @@ impl Problem {
             status: spec.status,
             title: spec.title.to_string(),
             detail: detail.into(),
-            errors: Vec::new(),
-            extensions: serde_json::Map::new(),
-            retry_after_secs: None,
+            extras: None,
         }
+    }
+
+    /// The extras block, allocated on first use.
+    fn extras_mut(&mut self) -> &mut ProblemExtras {
+        self.extras.get_or_insert_with(Box::default)
     }
 
     /// Attach per-field validation errors.
     #[must_use]
     pub fn with_field_errors(mut self, errors: Vec<FieldError>) -> Self {
-        self.errors = errors;
+        self.extras_mut().errors = errors;
         self
     }
 
     /// Merge an extension member into the body.
     #[must_use]
     pub fn with_extension(mut self, key: impl Into<String>, value: Value) -> Self {
-        self.extensions.insert(key.into(), value);
+        self.extras_mut().extensions.insert(key.into(), value);
         self
     }
 
     /// Set the `Retry-After` window (only meaningful on a 429).
     #[must_use]
     pub fn with_retry_after(mut self, secs: u64) -> Self {
-        self.retry_after_secs = Some(secs);
+        self.extras_mut().retry_after_secs = Some(secs);
         self
     }
 
@@ -406,6 +424,9 @@ impl Problem {
     /// is written into the body and echoed in `X-Request-Id`.
     #[must_use]
     pub fn into_response_with(self, type_base: &str, trace_id: Uuid) -> Response {
+        let extras = self
+            .extras
+            .map_or_else(ProblemExtras::default, |boxed| *boxed);
         let type_uri = if type_base.is_empty() {
             format!("#{}", self.code)
         } else {
@@ -418,8 +439,8 @@ impl Problem {
         body.insert("status".into(), json!(self.status));
         body.insert("detail".into(), json!(self.detail));
         body.insert("code".into(), json!(self.code));
-        if !self.errors.is_empty() {
-            let errs: Vec<Value> = self
+        if !extras.errors.is_empty() {
+            let errs: Vec<Value> = extras
                 .errors
                 .iter()
                 .map(|e| json!({ "field": e.field, "code": e.code, "detail": e.detail }))
@@ -427,7 +448,7 @@ impl Problem {
             body.insert("errors".into(), json!(errs));
         }
         body.insert("trace_id".into(), json!(trace_id.to_string()));
-        for (k, v) in self.extensions {
+        for (k, v) in extras.extensions {
             body.insert(k, v);
         }
 
@@ -442,7 +463,7 @@ impl Problem {
         if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
             response.headers_mut().insert("x-request-id", value);
         }
-        if let Some(secs) = self.retry_after_secs {
+        if let Some(secs) = extras.retry_after_secs {
             if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
                 response.headers_mut().insert(header::RETRY_AFTER, value);
             }

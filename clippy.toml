@@ -1,0 +1,6 @@
+# `Result<T, axum::response::Response>` is axum's own idiomatic error type for
+# handlers and extractors, and an axum `Response` is 128 bytes. Boxing it to
+# satisfy the default `result_large_err` threshold would fight the framework at
+# every call site for no real gain, so the floor sits one byte above it: axum's
+# own shape passes, anything larger is still reported.
+large-error-threshold = 129
